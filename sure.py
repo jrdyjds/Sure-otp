@@ -17,11 +17,13 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Con
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8931522547:AAHtwfo1JmFS8G5V6qiSYLpef63jrJ4ME6o")
 
 # ==================== MULTI API KEY CONFIGURATION ====================
+# API KEY 01 - Primary (Same as before)
 API_KEY_01 = os.environ.get("API_KEY_01", "MURAD_18A5CEE19525C2BD4E971385")
-API_KEY_02 = os.environ.get("API_KEY_02", "MURAD_C61C3844E4B293A48DEA60A6")
-
 BASE_URL_01 = os.environ.get("BASE_URL_01", "https://2eee7.com/@Access/@Bot/2eee7/@public")
-BASE_URL_02 = os.environ.get("BASE_URL_02", "https://2eee7.com/@Access/@Bot/2eee7/@public")
+
+# API KEY 02 - New (Updated with your new endpoint)
+API_KEY_02 = os.environ.get("API_KEY_02", "M7EGCC09EXI")
+BASE_URL_02 = os.environ.get("BASE_URL_02", "https://api.2oo9.cloud/MXS47FLFX0U/tnevs/@public/api")
 
 DEFAULT_API_KEY = "API_KEY_01"
 
@@ -34,10 +36,94 @@ WITHDRAW_DATA_FILE = "withdraw_requests.json"
 ACTIVITY_LOGS_FILE = "activity_logs.json"
 DATA_RANGE_FILE = "datarange.json"
 CUSTOM_SERVICES_FILE = "custom_services.json"
+ADMINS_FILE = "admins.json"
+OTP_GROUPS_FILE = "otp_groups.json"
 
 # ==================== MULTIPLE ADMINS CONFIGURATION ====================
-ADMINS = [2102179662]
-OTP_GROUP_ID = -1004374381669
+# ডিফল্ট অ্যাডমিন (প্রথমবার বট চালানোর জন্য)
+DEFAULT_ADMINS = [2102179662]
+
+# ডিফল্ট OTP গ্রুপ (প্রথমবার বট চালানোর জন্য)
+DEFAULT_OTP_GROUPS = [-1004374381669]
+
+# ==================== ADMINS FUNCTIONS ====================
+
+def load_admins():
+    """অ্যাডমিন লিস্ট লোড করে"""
+    if not os.path.exists(ADMINS_FILE):
+        with open(ADMINS_FILE, "w") as f:
+            json.dump(DEFAULT_ADMINS, f)
+        return DEFAULT_ADMINS
+    try:
+        with open(ADMINS_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return DEFAULT_ADMINS
+
+def save_admins(admins_list):
+    """অ্যাডমিন লিস্ট সেভ করে"""
+    with open(ADMINS_FILE, "w") as f:
+        json.dump(admins_list, f, indent=4)
+
+def is_admin(user_id):
+    """ইউজার অ্যাডমিন কিনা চেক করে"""
+    admins = load_admins()
+    return user_id in admins
+
+def add_admin(user_id):
+    """নতুন অ্যাডমিন যোগ করে"""
+    admins = load_admins()
+    if user_id not in admins:
+        admins.append(user_id)
+        save_admins(admins)
+        return True
+    return False
+
+def remove_admin(user_id):
+    """অ্যাডমিন রিমুভ করে"""
+    admins = load_admins()
+    if user_id in admins and user_id not in DEFAULT_ADMINS:
+        admins.remove(user_id)
+        save_admins(admins)
+        return True
+    return False
+
+# ==================== OTP GROUPS FUNCTIONS ====================
+
+def load_otp_groups():
+    """OTP গ্রুপ লিস্ট লোড করে"""
+    if not os.path.exists(OTP_GROUPS_FILE):
+        with open(OTP_GROUPS_FILE, "w") as f:
+            json.dump(DEFAULT_OTP_GROUPS, f)
+        return DEFAULT_OTP_GROUPS
+    try:
+        with open(OTP_GROUPS_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return DEFAULT_OTP_GROUPS
+
+def save_otp_groups(groups_list):
+    """OTP গ্রুপ লিস্ট সেভ করে"""
+    with open(OTP_GROUPS_FILE, "w") as f:
+        json.dump(groups_list, f, indent=4)
+
+def add_otp_group(group_id):
+    """নতুন OTP গ্রুপ যোগ করে"""
+    groups = load_otp_groups()
+    if group_id not in groups:
+        groups.append(group_id)
+        save_otp_groups(groups)
+        return True
+    return False
+
+def remove_otp_group(group_id):
+    """OTP গ্রুপ রিমুভ করে"""
+    groups = load_otp_groups()
+    if group_id in groups and group_id not in DEFAULT_OTP_GROUPS:
+        groups.remove(group_id)
+        save_otp_groups(groups)
+        return True
+    return False
 
 # ==================== WELCOME MESSAGE CONFIGURATION ====================
 WELCOME_MESSAGE = """⚡             𝗦𝗨𝗥𝗘 𝗕𝗢𝗧             ⚡ 
@@ -59,6 +145,9 @@ SUPPORT_LINK = "https://t.me/sure_otp_suppor"
 
 request_queue = asyncio.Queue()
 MAX_WORKERS = 500
+
+# ==================== USER LAST DATA STORAGE ====================
+user_last_data = {}  # ইউজারের শেষ সার্ভিস/কান্ট্রি/রেঞ্জ সংরক্ষণের জন্য
 
 # ==================== API KEY SELECTION FUNCTIONS ====================
 
@@ -83,6 +172,88 @@ def get_api_key_label(choice):
     elif choice == "API_KEY_02":
         return "🔑 API Key 02"
     return "🔑 Default"
+
+# ==================== API RESPONSE PARSERS ====================
+
+def parse_number_response(data, api_choice):
+    """ভিন্ন API থেকে রেসপন্স পার্স করে"""
+    try:
+        if api_choice == "API_KEY_01":
+            # প্রথম API এর ফরম্যাট (Same as before)
+            if data.get("meta", {}).get("status") == "ok":
+                number_data = data.get("data", {})
+                return {
+                    "number": number_data.get("full_number") or number_data.get("no_plus_number"),
+                    "otp_now": number_data.get("otp_now", False),
+                    "otp": number_data.get("otp"),
+                    "sms": number_data.get("sms"),
+                    "country": number_data.get("country", ""),
+                    "operator": number_data.get("operator", "")
+                }
+        
+        elif api_choice == "API_KEY_02":
+            # দ্বিতীয় API এর ফরম্যাট (2oo9 API format)
+            if data.get("meta", {}).get("code") == 200 and data.get("meta", {}).get("status") == "ok":
+                number_data = data.get("data", {})
+                return {
+                    "number": number_data.get("full_number") or number_data.get("no_plus_number"),
+                    "otp_now": False,
+                    "otp": None,
+                    "sms": None,
+                    "country": number_data.get("country", ""),
+                    "operator": number_data.get("operator", "")
+                }
+            elif data.get("meta", {}).get("code") == 2946:
+                print(f"Out of stock for range")
+                return None
+        
+        return None
+    except Exception as e:
+        print(f"Parse error for {api_choice}: {e}")
+        return None
+
+def parse_otp_response(data, api_choice):
+    """ভিন্ন API থেকে OTP রেসপন্স পার্স করে"""
+    try:
+        if api_choice == "API_KEY_01":
+            if isinstance(data, dict):
+                if "data" in data and isinstance(data["data"], dict) and "otps" in data["data"]:
+                    return data["data"]["otps"]
+                elif "otps" in data:
+                    return data["otps"]
+                elif "data" in data and isinstance(data["data"], list):
+                    return data["data"]
+            elif isinstance(data, list):
+                return data
+        
+        elif api_choice == "API_KEY_02":
+            if isinstance(data, dict):
+                if data.get("meta", {}).get("code") == 200 and data.get("meta", {}).get("status") == "ok":
+                    otp_data = data.get("data", {})
+                    otps = otp_data.get("otps", [])
+                    formatted_otps = []
+                    for otp in otps:
+                        formatted_otps.append({
+                            "number": otp.get("number", ""),
+                            "message": otp.get("message", ""),
+                            "otp_id": otp.get("otp_id", ""),
+                            "time": otp.get("time", 0)
+                        })
+                    return formatted_otps
+            elif isinstance(data, list):
+                return data
+        
+        return []
+    except Exception as e:
+        print(f"OTP parse error for {api_choice}: {e}")
+        return []
+
+def extract_otp_from_message(message):
+    """SMS মেসেজ থেকে OTP এক্সট্র্যাক্ট করে"""
+    if not message:
+        return None
+    otp_match = re.search(r'\b\d{4,8}\b', str(message))
+    return otp_match.group(0) if otp_match else None
 
 client_async = httpx.AsyncClient(
     http2=True,
@@ -189,11 +360,6 @@ def clean_country_display(val):
     if not val:
         return ""
     return re.sub(r'\s+', ' ', str(val)).strip().lower()
-
-# ==================== CHECK IF USER IS ADMIN ====================
-
-def is_admin(user_id):
-    return user_id in ADMINS
 
 # ==================== WITHDRAW DATA FUNCTIONS ====================
 
@@ -489,6 +655,7 @@ def build_user_management_inline_keyboard():
     ]
     return InlineKeyboardMarkup(buttons)
 
+# ==================== UPDATED SYSTEM CONFIG KEYBOARD ====================
 def build_system_config_inline_keyboard():
     buttons = [
         [
@@ -504,8 +671,80 @@ def build_system_config_inline_keyboard():
             InlineKeyboardButton(make_bold_unicode("➕ ADD BALANCE"), callback_data="adm_sys_add_bal"),
             InlineKeyboardButton(make_bold_unicode("➖ REMOVE BALANCE"), callback_data="adm_sys_rem_bal")
         ],
+        # ============ NEW: OTP Group Management ============
+        [InlineKeyboardButton(make_bold_unicode("📢 OTP GROUP MANAGEMENT"), callback_data="admin_otp_group_menu")],
+        # ============ NEW: Admin Management ============
+        [InlineKeyboardButton(make_bold_unicode("👑 ADMIN MANAGEMENT"), callback_data="admin_admin_management")],
         [InlineKeyboardButton(make_bold_unicode("🔙 BACK"), callback_data="adm_menu_back_to_admin")]
     ]
+    return InlineKeyboardMarkup(buttons)
+
+# ==================== OTP GROUP MANAGEMENT KEYBOARDS ====================
+def build_otp_group_management_keyboard():
+    """OTP গ্রুপ ম্যানেজমেন্ট কীবোর্ড"""
+    groups = load_otp_groups()
+    buttons = []
+    
+    for idx, group_id in enumerate(groups, 1):
+        is_default = "⭐" if group_id in DEFAULT_OTP_GROUPS else ""
+        label = f"{is_default} Group {idx}: {group_id}"
+        buttons.append([InlineKeyboardButton(label, callback_data=f"admin_otp_group_detail_{idx}")])
+    
+    buttons.append([InlineKeyboardButton("➕ ADD GROUP", callback_data="admin_otp_group_add")])
+    buttons.append([InlineKeyboardButton("🔙 BACK", callback_data="adm_menu_back_to_admin")])
+    
+    return InlineKeyboardMarkup(buttons)
+
+def build_otp_group_detail_keyboard(group_idx):
+    """একটি OTP গ্রুপের ডিটেইল কীবোর্ড"""
+    groups = load_otp_groups()
+    if group_idx > len(groups):
+        return None
+    
+    group_id = groups[group_idx - 1]
+    is_default = group_id in DEFAULT_OTP_GROUPS
+    
+    buttons = []
+    if not is_default:
+        buttons.append([InlineKeyboardButton("🗑️ REMOVE GROUP", callback_data=f"admin_otp_group_remove_{group_idx}")])
+    else:
+        buttons.append([InlineKeyboardButton("⭐ DEFAULT GROUP (Cannot Remove)", callback_data="admin_otp_group_default")])
+    
+    buttons.append([InlineKeyboardButton("🔙 BACK", callback_data="admin_otp_group_menu")])
+    return InlineKeyboardMarkup(buttons)
+
+# ==================== ADMIN MANAGEMENT KEYBOARDS ====================
+def build_admin_management_keyboard():
+    """অ্যাডমিন ম্যানেজমেন্ট কীবোর্ড"""
+    admins = load_admins()
+    buttons = []
+    
+    for idx, admin_id in enumerate(admins, 1):
+        is_default = "⭐" if admin_id in DEFAULT_ADMINS else ""
+        label = f"{is_default} Admin {idx}: {admin_id}"
+        buttons.append([InlineKeyboardButton(label, callback_data=f"admin_admin_detail_{idx}")])
+    
+    buttons.append([InlineKeyboardButton("➕ ADD ADMIN", callback_data="admin_admin_add")])
+    buttons.append([InlineKeyboardButton("🔙 BACK", callback_data="adm_menu_back_to_admin")])
+    
+    return InlineKeyboardMarkup(buttons)
+
+def build_admin_detail_keyboard(admin_idx):
+    """একটি অ্যাডমিনের ডিটেইল কীবোর্ড"""
+    admins = load_admins()
+    if admin_idx > len(admins):
+        return None
+    
+    admin_id = admins[admin_idx - 1]
+    is_default = admin_id in DEFAULT_ADMINS
+    
+    buttons = []
+    if not is_default:
+        buttons.append([InlineKeyboardButton("🗑️ REMOVE ADMIN", callback_data=f"admin_admin_remove_{admin_idx}")])
+    else:
+        buttons.append([InlineKeyboardButton("⭐ DEFAULT ADMIN (Cannot Remove)", callback_data="admin_admin_default")])
+    
+    buttons.append([InlineKeyboardButton("🔙 BACK", callback_data="admin_admin_management")])
     return InlineKeyboardMarkup(buttons)
 
 def build_manage_services_inline_keyboard():
@@ -576,6 +815,10 @@ def get_admin_panel_text():
     total_otps = 0
     for u in stats_data.values():
         total_otps += len(u.get("otps_received", []))
+    
+    admins = load_admins()
+    otp_groups = load_otp_groups()
+    
     text = (
         "👑 <b>ADMIN CONTROL PANEL</b> 👑\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -584,6 +827,8 @@ def get_admin_panel_text():
         f"📶 <b>Active Ranges:</b> <code>{total_ranges}</code>\n"
         f"🔑 <b>Processed OTPs:</b> <code>{total_otps}</code>\n"
         f"🚫 <b>Banned Accounts:</b> <code>{banned}</code>\n"
+        f"👑 <b>Total Admins:</b> <code>{len(admins)}</code>\n"
+        f"📢 <b>OTP Groups:</b> <code>{len(otp_groups)}</code>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "💎 <i>PANEL X SMS Bot • Live & Operating</i>"
     )
@@ -874,6 +1119,7 @@ async def show_app_selection(update, context):
 async def monitor_loop(app):
     while True:
         try:
+            # Check API 01
             api_key_01, base_url_01 = get_api_credentials_by_choice("API_KEY_01")
             headers_01 = {
                 "X-API-Key": api_key_01,
@@ -881,131 +1127,176 @@ async def monitor_loop(app):
                 "Connection": "keep-alive"
             }
             r = await client_async.get(f"{base_url_01}/api/success-otp-info", headers=headers_01)
-            if r.status_code != 200:
-                api_key_02, base_url_02 = get_api_credentials_by_choice("API_KEY_02")
-                headers_02 = {
-                    "X-API-Key": api_key_02,
-                    "Accept": "application/json, text/plain, */*",
-                    "Connection": "keep-alive"
-                }
-                r = await client_async.get(f"{base_url_02}/api/success-otp-info", headers=headers_02)
-                if r.status_code != 200:
-                    print(f"Monitor API Error: Both APIs failed")
-                    await asyncio.sleep(CHECK_INTERVAL)
-                    continue
-            try:
-                res = r.json()
-            except json.JSONDecodeError:
-                raw_text = r.text.strip()
-                if raw_text and raw_text != "no_otp":
-                    print(f"Monitor raw API non-JSON response: {raw_text[:100]}")
-                await asyncio.sleep(CHECK_INTERVAL)
-                continue
-            otps = []
-            if isinstance(res, dict):
-                if "data" in res and isinstance(res["data"], dict) and "otps" in res["data"]:
-                    otps = res["data"]["otps"]
-                elif "otps" in res:
-                    otps = res["otps"]
-                elif "data" in res and isinstance(res["data"], list):
-                    otps = res["data"]
-            elif isinstance(res, list):
-                otps = res
-            if otps:
-                paid_data = load_data(PAID_SMS_FILE)
-                range_db = load_data(DATA_RANGE_FILE)
-                paid_keys_set = set(paid_data.keys())
-                processed_in_session = set()
-                for otp in otps:
-                    num = normalize_number(otp.get("number") or otp.get("phone") or "")
-                    full_sms = (
-                        otp.get('message') or 
-                        otp.get('sms') or 
-                        otp.get('text') or 
-                        otp.get('msg') or 
-                        otp.get('content') or 
-                        "No SMS Content"
-                    )
-                    ext_otp, ext_link = extract_link_and_otp(full_sms)
-                    otp_code = otp.get("otp") or otp.get("otp_code") or ext_otp
-                    service_name = otp.get("platform") or otp.get("service") or detect_service(full_sms)
-                    otp_id = str(otp.get("otp_id", "") or otp.get("id", ""))
-                    sms_key = otp_id if otp_id else f"{num}_{full_sms}"
-                    matched_key = None
-                    for active_num in active_numbers.keys():
-                        if numbers_match(num, active_num):
-                            matched_key = active_num
-                            break
-                    if (matched_key is not None and
-                            sms_key not in paid_keys_set and
-                            sms_key not in processed_in_session):
-                        details = active_numbers[matched_key]
-                        paid_keys_set.add(sms_key)
-                        processed_in_session.add(sms_key)
-                        paid_data[sms_key] = {"uid": details["uid"], "otp": otp_code}
-                        await update_db_balance(details["uid"], OTP_RATE)
-                        add_otp_received(details["uid"])
-                        log_global_activity(details["uid"], "OTP_RECEIVED", {"number": matched_key, "otp": otp_code, "sms": full_sms})
-                        num_range_info = range_db.get(matched_key, {}).get("range", "")
-                        if not num_range_info:
-                            num_range_info = active_numbers.get(matched_key, {}).get("range", "")
-                        if not num_range_info and matched_key:
-                            _d = re.sub(r'\D', '', str(matched_key))
-                            num_range_info = (_d[:-3] + 'XXX') if len(_d) > 3 else (_d + 'XXX')
-                        country_flag, country_name = get_country_info(matched_key)
-                        clean_num = matched_key.replace('+', '').strip()
-                        full_number = f"+{clean_num}"
-                        masked_number = f"+{mask_number(clean_num)}"
-                        safe_full_sms = html.escape(str(full_sms))
-                        safe_otp_code = html.escape(str(otp_code))
-                        link_section = ""
-                        if ext_link:
-                            link_section = f"<blockquote>🔗 <b>LINK:</b> <a href='{ext_link}'>{ext_link}</a></blockquote>\n"
-                        user_msg = (
-                            f"✅ <b>OTP RECEIVE SUCCESSFUL</b> ✅\n\n"
-                            f"<blockquote>🌍 COUNTRY: <code>{country_flag} {country_name}</code></blockquote>\n"
-                            f"<blockquote>📱 SERVICE: <code>{service_name}</code></blockquote>\n"
-                            f"<blockquote>📞 NUMBER: <code>{full_number}</code></blockquote>\n"
-                            f"<blockquote>🔑 OTP: <code>{safe_otp_code}</code></blockquote>\n"
-                            f"{link_section}\n"
-                            f"<blockquote>📩 FULL SMS:\n<code>{safe_full_sms}</code></blockquote>\n\n"
-                            f"<b>💵 ADD BALANCE FOR {OTP_RATE:.2f} BDT</b>"
-                        )
-                        group_msg = (
-                            f"✅ <b>OTP RECEIVE SUCCESSFUL</b> ✅\n\n"
-                            f"<blockquote>📶 RANGE: <code>{num_range_info}</code></blockquote>\n"
-                            f"<blockquote>🌍 COUNTRY: <code>{country_flag} {country_name}</code></blockquote>\n"
-                            f"<blockquote>📱 SERVICE: <code>{service_name}</code></blockquote>\n"
-                            f"<blockquote>📞 NUMBER: <code>{masked_number}</code></blockquote>\n"
-                            f"<blockquote>🔑 OTP: <code>{safe_otp_code}</code></blockquote>\n"
-                            f"{link_section}\n"
-                            f"<blockquote>📩 FULL SMS:\n<code>{safe_full_sms}</code></blockquote>"
-                        )
-                        group_buttons = InlineKeyboardMarkup([
-                            [
-                                InlineKeyboardButton("‼️ NUMBER ", url="https://t.me/Sure_otp07_bot"),
-                                InlineKeyboardButton("📢 CHANNEL", url="https://t.me/sure_otp_suppor")
-                            ]
-                        ])
-                        try:
-                            await app.bot.send_message(details["uid"], user_msg, parse_mode="HTML")
-                        except Exception as e:
-                            print(f"❌ User Message Send Fail: {e}")
-                        try:
-                            await app.bot.send_message(OTP_GROUP_ID, group_msg, parse_mode="HTML", reply_markup=group_buttons)
-                        except Exception as e:
-                            print(f"❌ Group Send Fail: {e}")
-                        save_data(paid_data, PAID_SMS_FILE)
-                current_time = datetime.now()
-                for num_key in list(active_numbers.keys()):
-                    entry = active_numbers[num_key]
-                    if 'timestamp' not in entry:
-                        entry['timestamp'] = current_time
-                    elif (current_time - entry['timestamp']).total_seconds() > 3600:
-                        del active_numbers[num_key]
+            if r.status_code == 200:
+                try:
+                    res = r.json()
+                    otps = parse_otp_response(res, "API_KEY_01")
+                    if otps:
+                        await process_otps(otps, "API_KEY_01", app)
+                except:
+                    pass
+            
+            # Check API 02 (New 2oo9 API)
+            api_key_02, base_url_02 = get_api_credentials_by_choice("API_KEY_02")
+            headers_02 = {
+                "mauthapi": api_key_02,
+                "Accept": "application/json, text/plain, */*",
+                "Connection": "keep-alive"
+            }
+            r2 = await client_async.get(f"{base_url_02}/success-otp", headers=headers_02)
+            if r2.status_code == 200:
+                try:
+                    res2 = r2.json()
+                    otps = parse_otp_response(res2, "API_KEY_02")
+                    if otps:
+                        await process_otps(otps, "API_KEY_02", app)
+                except:
+                    pass
+            
         except Exception as e:
             print(f"Monitor Error: {e}")
         await asyncio.sleep(CHECK_INTERVAL)
+
+async def send_otp_to_groups(app, group_msg, group_buttons):
+    """সকল OTP গ্রুপে মেসেজ পাঠায়"""
+    groups = load_otp_groups()
+    success_count = 0
+    fail_count = 0
+    
+    for group_id in groups:
+        try:
+            await app.bot.send_message(
+                group_id, 
+                group_msg, 
+                parse_mode="HTML", 
+                reply_markup=group_buttons
+            )
+            success_count += 1
+        except Exception as e:
+            fail_count += 1
+            print(f"❌ Group Send Fail ({group_id}): {e}")
+    
+    return success_count, fail_count
+
+async def process_otps(otps, api_choice, app):
+    """OTP প্রসেস করে"""
+    paid_data = load_data(PAID_SMS_FILE)
+    range_db = load_data(DATA_RANGE_FILE)
+    paid_keys_set = set(paid_data.keys())
+    processed_in_session = set()
+    
+    for otp in otps:
+        num = normalize_number(otp.get("number") or "")
+        full_sms = otp.get("message") or otp.get("sms") or otp.get("text") or "No SMS Content"
+        
+        otp_code = extract_otp_from_message(full_sms)
+        if not otp_code:
+            continue
+        
+        service_name = detect_service(full_sms)
+        sms_key = f"{num}_{full_sms[:50]}"
+        
+        matched_key = None
+        for active_num in active_numbers.keys():
+            if numbers_match(num, active_num):
+                matched_key = active_num
+                break
+        
+        if (matched_key is not None and
+                sms_key not in paid_keys_set and
+                sms_key not in processed_in_session):
+            details = active_numbers[matched_key]
+            paid_keys_set.add(sms_key)
+            processed_in_session.add(sms_key)
+            paid_data[sms_key] = {"uid": details["uid"], "otp": otp_code}
+            await update_db_balance(details["uid"], OTP_RATE)
+            add_otp_received(details["uid"])
+            log_global_activity(details["uid"], "OTP_RECEIVED", {"number": matched_key, "otp": otp_code, "sms": full_sms})
+            
+            num_range_info = range_db.get(matched_key, {}).get("range", "")
+            if not num_range_info:
+                num_range_info = active_numbers.get(matched_key, {}).get("range", "")
+            if not num_range_info and matched_key:
+                _d = re.sub(r'\D', '', str(matched_key))
+                num_range_info = (_d[:-3] + 'XXX') if len(_d) > 3 else (_d + 'XXX')
+            
+            country_flag, country_name = get_country_info(matched_key)
+            clean_num = matched_key.replace('+', '').strip()
+            full_number = f"+{clean_num}"
+            masked_number = f"+{mask_number(clean_num)}"
+            safe_full_sms = html.escape(str(full_sms))
+            safe_otp_code = html.escape(str(otp_code))
+            
+            # ইউজারের শেষ ডেটা সংরক্ষণ
+            user_last_data[details["uid"]] = {
+                "last_range": num_range_info,
+                "last_service": service_name,
+                "last_country": f"{country_flag} {country_name}",
+                "last_number": matched_key
+            }
+            
+            # ============ UPDATED USER MESSAGE WITH BUTTONS ============
+            user_msg = (
+                f"✅ <b>OTP RECEIVE SUCCESSFUL</b> ✅\n\n"
+                f"<blockquote>🌍 COUNTRY: <code>{country_flag} {country_name}</code></blockquote>\n"
+                f"<blockquote>📱 SERVICE: <code>{service_name}</code></blockquote>\n"
+                f"<blockquote>📞 NUMBER: <code>{full_number}</code></blockquote>\n"
+                f"<blockquote>🔑 OTP: <code>{safe_otp_code}</code></blockquote>\n"
+                f"<blockquote>📩 FULL SMS:\n<code>{safe_full_sms}</code></blockquote>\n\n"
+                f"<b>💵 ADD BALANCE FOR {OTP_RATE:.2f} BDT</b>"
+            )
+            
+            # ============ NEW INLINE BUTTONS ============
+            user_buttons = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("🔄 CHANGE NUMBER", callback_data=f"change_number_{details['uid']}"),
+                    InlineKeyboardButton("🌏 CHANGE COUNTRY", callback_data=f"change_country_{details['uid']}")
+                ],
+                [
+                    InlineKeyboardButton("📢 OTP GROUP", url="https://t.me/sure_otp_suppor")
+                ]
+            ])
+            
+            group_msg = (
+                f"✅ <b>OTP RECEIVE SUCCESSFUL</b> ✅\n\n"
+                f"<blockquote>📶 RANGE: <code>{num_range_info}</code></blockquote>\n"
+                f"<blockquote>🌍 COUNTRY: <code>{country_flag} {country_name}</code></blockquote>\n"
+                f"<blockquote>📱 SERVICE: <code>{service_name}</code></blockquote>\n"
+                f"<blockquote>📞 NUMBER: <code>{masked_number}</code></blockquote>\n"
+                f"<blockquote>🔑 OTP: <code>{safe_otp_code}</code></blockquote>\n"
+                f"<blockquote>📩 FULL SMS:\n<code>{safe_full_sms}</code></blockquote>"
+            )
+            
+            group_buttons = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("‼️ NUMBER ", url="https://t.me/Sure_otp07_bot"),
+                    InlineKeyboardButton("📢 CHANNEL", url="https://t.me/sure_otp_suppor")
+                ]
+            ])
+            
+            try:
+                await app.bot.send_message(
+                    details["uid"], 
+                    user_msg, 
+                    parse_mode="HTML",
+                    reply_markup=user_buttons
+                )
+            except Exception as e:
+                print(f"❌ User Message Send Fail: {e}")
+            
+            # ============ SEND TO ALL OTP GROUPS ============
+            success, fail = await send_otp_to_groups(app, group_msg, group_buttons)
+            print(f"📊 OTP Groups: Success={success}, Failed={fail}")
+            
+            save_data(paid_data, PAID_SMS_FILE)
+    
+    current_time = datetime.now()
+    for num_key in list(active_numbers.keys()):
+        entry = active_numbers[num_key]
+        if 'timestamp' not in entry:
+            entry['timestamp'] = current_time
+        elif (current_time - entry['timestamp']).total_seconds() > 3600:
+            del active_numbers[num_key]
 
 # ==================== WORKER & API SECTION ====================
 
@@ -1013,38 +1304,47 @@ async def fetch_number_async(range_str):
     try:
         api_choice = get_api_key_for_range(range_str)
         api_key, base_url = get_api_credentials_by_choice(api_choice)
-        url = f"{base_url}/api/getnum"
-        payload = {"range": range_str}
-        headers = {
-            "X-API-Key": api_key,
-            "Accept": "application/json, text/plain, */*",
-            "Connection": "keep-alive",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        }
-        r = await client_async.post(url, json=payload, headers=headers)
-        if r.status_code != 200:
-            print(f"fetch_number_async Error: HTTP {r.status_code} for {api_choice}")
-            return None
-        try:
-            data = r.json()
-        except:
-            return None
-        if data.get("meta", {}).get("code") == 2946:
-            print(f"Out of stock for range: {range_str}")
-            return None
-        if data.get("meta", {}).get("status") == "ok":
-            number_data = data.get("data", {})
-            full_number = number_data.get("full_number") or number_data.get("no_plus_number")
-            if full_number:
-                return {
-                    "number": str(full_number),
-                    "otp_now": number_data.get("otp_now", False),
-                    "otp": None,
-                    "sms": None,
-                    "country": number_data.get("country", ""),
-                    "operator": number_data.get("operator", "")
-                }
+        
+        if api_choice == "API_KEY_01":
+            url = f"{base_url}/api/getnum"
+            payload = {"range": range_str}
+            headers = {
+                "X-API-Key": api_key,
+                "Accept": "application/json, text/plain, */*",
+                "Connection": "keep-alive",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
+            r = await client_async.post(url, json=payload, headers=headers)
+            if r.status_code != 200:
+                return None
+            try:
+                data = r.json()
+            except:
+                return None
+            return parse_number_response(data, "API_KEY_01")
+        
+        elif api_choice == "API_KEY_02":
+            clean_range = re.sub(r'[xX]+$', '', str(range_str)).strip()
+            url = f"{base_url}/getnum"
+            payload = {"rid": clean_range}
+            headers = {
+                "mauthapi": api_key,
+                "Accept": "application/json, text/plain, */*",
+                "Connection": "keep-alive",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
+            r = await client_async.post(url, json=payload, headers=headers)
+            if r.status_code != 200:
+                print(f"2oo9 API Error: HTTP {r.status_code}")
+                return None
+            try:
+                data = r.json()
+            except:
+                return None
+            return parse_number_response(data, "API_KEY_02")
+        
         return None
+        
     except httpx.ReadTimeout:
         print(f"Fetch number error: ReadTimeout for range {range_str}")
     except Exception as e:
@@ -1065,6 +1365,7 @@ async def fast_allocate_number_multi(query, context, ranges_list, sid):
         )
     except Exception as e:
         print(f"Edit loading state error: {e}")
+    
     res = None
     successful_range = None
     for r_text in ranges_list:
@@ -1076,6 +1377,7 @@ async def fast_allocate_number_multi(query, context, ranges_list, sid):
         except Exception as e:
             print(f"Error trying range {r_text}: {e}")
             continue
+    
     if not res or not res.get("number"):
         try:
             await query.message.edit_text(
@@ -1090,35 +1392,34 @@ async def fast_allocate_number_multi(query, context, ranges_list, sid):
         except:
             pass
         return
+    
     clean_num = normalize_number(res["number"])
     add_number_taken(uid, 1)
     last_range[uid] = successful_range
     active_numbers[clean_num] = {"uid": uid, "range": successful_range, "timestamp": datetime.now()}
     save_number_range_info(uid, clean_num, successful_range)
     country_flag, country_name = get_country_info(clean_num)
-    if res.get("otp_now") and res.get("otp"):
-        otp_safe = html.escape(str(res["otp"]))
-        sms_safe = html.escape(str(res.get("sms") or ""))
-        add_otp_received(uid)
-        text = (
-            f"✅ <b>YOUR NUMBER</b> ✅\n\n"
-            f"<blockquote>🌍 COUNTRY: <code>{country_flag} {html.escape(country_name)}</code></blockquote>\n"
-            f"<blockquote>📶 RANGE: <code>{successful_range}</code></blockquote>\n"
-            f"<blockquote>📞 NUMBER: <code>+{clean_num}</code></blockquote>\n"
-            f"<blockquote>🔑 OTP: <code>{otp_safe}</code></blockquote>"
-            + (f"\n<blockquote>📩 SMS: <code>{sms_safe}</code></blockquote>" if sms_safe else "")
-            + "\n\n<b>✅ OTP RECEIVED INSTANTLY!</b>"
-        )
-    else:
-        text = (
-            f"✅ <b>YOUR NUMBER</b> ✅\n\n"
-            f"<blockquote>🌍 COUNTRY: <code>{country_flag} {html.escape(country_name)}</code></blockquote>\n"
-            f"<blockquote>📶 RANGE: <code>{successful_range}</code></blockquote>\n"
-            f"<blockquote>📞 NUMBER: <code>+{clean_num}</code></blockquote>\n\n"
-            f"<b>📩 SMS STATUS: ⏳ WAITING...</b>"
-        )
+    
+    # ইউজারের শেষ ডেটা সংরক্ষণ
+    user_last_data[uid] = {
+        "last_range": successful_range,
+        "last_service": sid,
+        "last_country": f"{country_flag} {country_name}",
+        "last_number": clean_num
+    }
+    
+    text = (
+        f"✅ <b>YOUR NUMBER</b> ✅\n\n"
+        f"<blockquote>🌍 COUNTRY: <code>{country_flag} {html.escape(country_name)}</code></blockquote>\n"
+        f"<blockquote>📶 RANGE: <code>{successful_range}</code></blockquote>\n"
+        f"<blockquote>📞 NUMBER: <code>+{clean_num}</code></blockquote>\n\n"
+        f"<b>📩 SMS STATUS: ⏳ WAITING...</b>"
+    )
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 CHANGE NUMBER", callback_data="same_range")],
+        [
+            InlineKeyboardButton("🔄 CHANGE NUMBER", callback_data=f"change_number_{uid}"),
+            InlineKeyboardButton("🌏 CHANGE COUNTRY", callback_data=f"change_country_{uid}")
+        ],
         [InlineKeyboardButton("📢 OTP GROUP", url="https://t.me/SURE_OTP_GROUP")]
     ])
     try:
@@ -1162,29 +1463,19 @@ async def process_auto_number(update, context, range_text):
         active_numbers[generated_num] = {"uid": uid, "range": range_text, "timestamp": datetime.now()}
         save_number_range_info(uid, generated_num, range_text)
         country_flag, country_name = get_country_info(generated_num)
-        if res.get("otp_now") and res.get("otp"):
-            instant_otp = html.escape(str(res["otp"]))
-            instant_sms = html.escape(str(res.get("sms") or ""))
-            add_otp_received(uid)
-            final_text = (
-                f"✅ <b>YOUR NUMBER DETAILS</b> ✅\n\n"
-                f"<blockquote>🌍 COUNTRY: <code>{country_flag} {country_name}</code></blockquote>\n"
-                f"<blockquote>📶 RANGE: <code>{range_text}</code></blockquote>\n\n"
-                f"<blockquote>📞 NUMBER: <code>+{generated_num}</code></blockquote>\n\n"
-                f"<blockquote>🔑 OTP: <code>{instant_otp}</code></blockquote>\n"
-                + (f"<blockquote>📩 SMS: <code>{instant_sms}</code></blockquote>\n" if instant_sms else "")
-                + f"\n<b>✅ OTP RECEIVED INSTANTLY!</b>"
-            )
-        else:
-            final_text = (
-                f"✅ <b>YOUR NUMBER DETAILS</b> ✅\n\n"
-                f"<blockquote>🌍 COUNTRY: <code>{country_flag} {country_name}</code></blockquote>\n"
-                f"<blockquote>📶 RANGE: <code>{range_text}</code></blockquote>\n\n"
-                f"<blockquote>📞 NUMBER: <code>+{generated_num}</code></blockquote>\n\n"
-                f"<b>📩 SMS STATUS: ⏳ WAITING...</b>"
-            )
+        
+        final_text = (
+            f"✅ <b>YOUR NUMBER DETAILS</b> ✅\n\n"
+            f"<blockquote>🌍 COUNTRY: <code>{country_flag} {country_name}</code></blockquote>\n"
+            f"<blockquote>📶 RANGE: <code>{range_text}</code></blockquote>\n\n"
+            f"<blockquote>📞 NUMBER: <code>+{generated_num}</code></blockquote>\n\n"
+            f"<b>📩 SMS STATUS: ⏳ WAITING...</b>"
+        )
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔄 ", callback_data="same_range")],
+            [
+                InlineKeyboardButton("🔄 CHANGE NUMBER", callback_data=f"change_number_{uid}"),
+                InlineKeyboardButton("🌏 CHANGE COUNTRY", callback_data=f"change_country_{uid}")
+            ],
             [InlineKeyboardButton("📢 OTP GROUP", url="https://t.me/panelx_sk_otp")]
         ])
         await status_msg.edit_text(final_text, parse_mode="HTML", reply_markup=keyboard)
@@ -1227,10 +1518,10 @@ async def process_numbers(update_or_query, context, range_text, count):
                 active_numbers[clean_num] = {"uid": uid, "range": range_text, "timestamp": datetime.now()}
                 save_number_range_info(uid, clean_num, range_text)
                 num_entries.append({
-                    "num":     clean_num,
+                    "num": clean_num,
                     "otp_now": r.get("otp_now", False),
-                    "otp":     r.get("otp"),
-                    "sms":     r.get("sms"),
+                    "otp": r.get("otp"),
+                    "sms": r.get("sms"),
                 })
 
         if not num_entries:
@@ -1241,34 +1532,24 @@ async def process_numbers(update_or_query, context, range_text, count):
 
         num_lines = []
         for entry in num_entries:
-            if entry["otp_now"] and entry["otp"]:
-                otp_safe = html.escape(str(entry["otp"]))
-                sms_safe = html.escape(str(entry.get("sms") or ""))
-                add_otp_received(uid)
-                line = (
-                    f"<blockquote>📞 NUMBER: <code>+{entry['num']}</code>\n"
-                    f"🔑 OTP: <code>{otp_safe}</code>"
-                    + (f"\n📩 SMS: <code>{sms_safe}</code>" if sms_safe else "")
-                    + "</blockquote>"
-                )
-            else:
-                line = f"<blockquote>📞 NUMBER: <code>+{entry['num']}</code></blockquote>"
+            line = f"<blockquote>📞 NUMBER: <code>+{entry['num']}</code></blockquote>"
             num_lines.append(line)
 
         num_list_text = "\n".join(num_lines)
-        any_instant = any(e["otp_now"] and e["otp"] for e in num_entries)
-        sms_status = "✅ OTP RECEIVED INSTANTLY!" if any_instant else "📩 SMS STATUS: ⏳ WAITING..."
 
         final_text = (
             f"✅ <b>YOUR NUMBER DETAILS</b> ✅\n\n"
             f"<blockquote>🌍 COUNTRY: <code>{country_flag} {country_name}</code></blockquote>\n"
             f"<blockquote>📶 RANGE: <code>{range_text}</code></blockquote>\n\n"
             f"{num_list_text}\n\n"
-            f"<b>{sms_status}</b>"
+            f"<b>📩 SMS STATUS: ⏳ WAITING...</b>"
         )
 
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔄 CHANGE NUMBER", callback_data="same_range")],
+            [
+                InlineKeyboardButton("🔄 CHANGE NUMBER", callback_data=f"change_number_{uid}"),
+                InlineKeyboardButton("🌏 CHANGE COUNTRY", callback_data=f"change_country_{uid}")
+            ],
             [InlineKeyboardButton("📢 OTP GROUP", url="https://t.me/panelx_sk_otp")]
         ])
 
@@ -1431,7 +1712,7 @@ async def process_withdraw_confirm(update: Update, context: ContextTypes.DEFAULT
         InlineKeyboardButton("❌ REJECT", callback_data=f"admin_reject_{payment_id}"),
         InlineKeyboardButton("✅ APPROVE", callback_data=f"admin_approve_{payment_id}")
     ]])
-    for admin_id in ADMINS:
+    for admin_id in load_admins():
         try:
             await context.bot.send_message(admin_id, admin_msg, parse_mode="HTML", reply_markup=admin_kb)
         except Exception as e:
@@ -1624,7 +1905,7 @@ async def process_unban_user(update, context):
     await update.message.reply_text(f"✅ USER `{uid_to_unban}` UNBANNED!", parse_mode="Markdown")
     context.user_data["admin_unban_mode"] = False
 
-# ==================== MESSAGE HANDLER SECTION (COMPLETE) ====================
+# ==================== MESSAGE HANDLER SECTION ====================
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
@@ -1633,7 +1914,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw_text = update.message.text.strip() if update.message.text else ""
     text = normalize_stylized_text(raw_text).strip()
 
-    # 🛡️ SMART CHAT GUARD
     if is_state_cancelling_input(text):
         context.user_data["admin_state"] = None
         context.user_data["temp_target_service"] = None
@@ -1651,7 +1931,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     admin_state = context.user_data.get("admin_state")
     if admin_state and is_admin(uid):
-        # 1. ADD SERVICE
         if admin_state == "waiting_for_add_service_name_inline":
             svc_name = text.strip().upper()
             custom_svcs = load_custom_services()
@@ -1672,7 +1951,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # 2. RENAME SERVICE
         elif admin_state == "waiting_for_rename_service_inline":
             new_name = text.strip().upper()
             old_name = context.user_data.get("temp_target_service")
@@ -1694,7 +1972,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # 3. ADD RANGE - API Key already selected, now receiving range
         elif admin_state == "waiting_for_add_range_inline":
             range_val = text.strip().upper()
             svc_name = context.user_data.get("temp_target_service")
@@ -1714,14 +1991,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data["admin_state"] = None
                 return
             
-            # Check if range already exists
             dup = any(r.get("range", "").upper() == range_val for r in target_svc.get("ranges", []))
             if dup:
                 await update.message.reply_text(f"❌ **Range '{range_val}' already exists under '{svc_name}'!**", parse_mode="Markdown")
                 context.user_data["admin_state"] = None
                 return
             
-            # Add the range with API key
             prefix = re.sub(r'[xX]+$', '', range_val).strip()
             prefix_clean = re.sub(r'\D', '', prefix)
             
@@ -1750,7 +2025,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["temp_target_country"] = None
             context.user_data["selected_api_key"] = None
             
-            # Show updated view
             kb = build_country_detail_keyboard(svc_name, cname)
             if kb:
                 await update.message.reply_text(
@@ -1761,7 +2035,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             return
 
-        # 4. RENAME COUNTRY
         elif admin_state == "waiting_for_rename_country_inline":
             new_country_name = text.strip()
             svc_name = context.user_data.get("temp_target_service")
@@ -1796,7 +2069,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             return
 
-        # 5. EDIT RANGE
         elif admin_state == "waiting_for_edit_range_inline":
             new_range = text.strip().upper()
             svc_name = context.user_data.get("temp_target_service")
@@ -1833,7 +2105,56 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             return
 
-    # Withdraw flow
+        # ============ NEW: OTP Group Add ============
+        elif admin_state == "waiting_for_otp_group_add":
+            try:
+                group_id = int(text.strip())
+                if add_otp_group(group_id):
+                    await update.message.reply_text(
+                        f"✅ OTP Group <code>{group_id}</code> added successfully!\n\n"
+                        f"📊 Total Groups: {len(load_otp_groups())}",
+                        parse_mode="HTML",
+                        reply_markup=main_keyboard(uid)
+                    )
+                else:
+                    await update.message.reply_text(
+                        f"⚠️ Group <code>{group_id}</code> already exists!",
+                        parse_mode="HTML",
+                        reply_markup=main_keyboard(uid)
+                    )
+            except ValueError:
+                await update.message.reply_text(
+                    "❌ Invalid Group ID! Please send a valid numeric ID.",
+                    reply_markup=main_keyboard(uid)
+                )
+            context.user_data["admin_state"] = None
+            return
+
+        # ============ NEW: Admin Add ============
+        elif admin_state == "waiting_for_admin_add":
+            try:
+                admin_id = int(text.strip())
+                if add_admin(admin_id):
+                    await update.message.reply_text(
+                        f"✅ Admin <code>{admin_id}</code> added successfully!\n\n"
+                        f"👑 Total Admins: {len(load_admins())}",
+                        parse_mode="HTML",
+                        reply_markup=main_keyboard(uid)
+                    )
+                else:
+                    await update.message.reply_text(
+                        f"⚠️ Admin <code>{admin_id}</code> already exists!",
+                        parse_mode="HTML",
+                        reply_markup=main_keyboard(uid)
+                    )
+            except ValueError:
+                await update.message.reply_text(
+                    "❌ Invalid Admin ID! Please send a valid numeric ID.",
+                    reply_markup=main_keyboard(uid)
+                )
+            context.user_data["admin_state"] = None
+            return
+
     if context.user_data.get("withdraw_mode") == "select_method":
         await withdraw_method_selected(update, context)
         return
@@ -1844,7 +2165,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await withdraw_number_received(update, context)
         return
 
-    # Admin Balance & Ban configuration
     if context.user_data.get("add_balance_mode") and is_admin(uid):
         if context.user_data.get("pending_add_user"):
             await process_add_balance_amount(update, context)
@@ -1864,7 +2184,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await process_unban_user(update, context)
         return
 
-    # User Status Checking
     if context.user_data.get("mode") == "input_user_id" and is_admin(uid):
         target_uid = text.strip()
         if not target_uid.isdigit():
@@ -1887,18 +2206,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Ban check
     if not is_admin(uid) and is_user_banned(uid):
         await update.message.reply_text("🚫 YOU ARE BANNED 🚫", reply_markup=main_keyboard(uid))
         return
 
-    # Cancel
     if text == "❌ CANCEL":
         context.user_data.clear()
         await update.message.reply_text("❌ CANCELLED", reply_markup=main_keyboard(uid))
         return
 
-    # PROFILE
     if "PROFILE" in text:
         user_data = get_user(uid)
         stats = get_user_stats(uid)
@@ -1953,7 +2269,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(support_text, reply_markup=keyboard, parse_mode="Markdown")
         return
 
-    # Admin Panel
     if "ADMIN PANEL" in text and is_admin(uid):
         context.user_data["admin_mode"] = "main"
         admin_text = get_admin_panel_text()
@@ -1964,7 +2279,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # BROADCAST
     if context.user_data.get("broadcast_mode") and is_admin(uid):
         context.user_data["broadcast_mode"] = False
         user_db = load_data(USER_DATA_FILE)
@@ -2176,7 +2490,152 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["broadcast_mode"] = False
     context.user_data["mode"] = None
 
-    # ADMIN ROUTING
+    # ============ CHANGE NUMBER BUTTON ============
+    if data.startswith("change_number_"):
+        user_id = int(data.replace("change_number_", ""))
+        
+        if uid not in user_last_data:
+            await query.message.reply_text(
+                "❌ আপনার আগের ডেটা পাওয়া যায়নি। দয়া করে নতুন করে GET NUMBER করুন।",
+                reply_markup=main_keyboard(uid)
+            )
+            return
+        
+        last_data = user_last_data[uid]
+        last_range = last_data.get("last_range", "")
+        last_service = last_data.get("last_service", "")
+        
+        if not last_range:
+            await query.message.reply_text(
+                "❌ রেঞ্জ তথ্য পাওয়া যায়নি। দয়া করে নতুন করে GET NUMBER করুন।",
+                reply_markup=main_keyboard(uid)
+            )
+            return
+        
+        await query.message.edit_text(
+            f"🔄 <b>FETCHING NEW NUMBER</b>\n\n"
+            f"<blockquote>📱 SERVICE: <code>{last_service}</code></blockquote>\n"
+            f"<blockquote>📶 RANGE: <code>{last_range}</code></blockquote>\n\n"
+            f"<i>⏳ Searching for new number...</i>",
+            parse_mode="HTML"
+        )
+        
+        res = await fetch_number_async(last_range)
+        
+        if not res or not res.get("number"):
+            await query.message.edit_text(
+                f"❌ <b>No number available</b>\n\n"
+                f"<blockquote>📶 RANGE: <code>{last_range}</code></blockquote>\n"
+                f"⚠️ এই রেঞ্জে এখন নম্বর নেই। অন্য রেঞ্জ চেষ্টা করুন।",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🌏 CHANGE COUNTRY", callback_data=f"change_country_{uid}")
+                ]])
+            )
+            return
+        
+        clean_num = normalize_number(res["number"])
+        add_number_taken(uid, 1)
+        last_range[uid] = last_range
+        active_numbers[clean_num] = {"uid": uid, "range": last_range, "timestamp": datetime.now()}
+        save_number_range_info(uid, clean_num, last_range)
+        
+        country_flag, country_name = get_country_info(clean_num)
+        
+        new_number_msg = (
+            f"✅ <b>NEW NUMBER ALLOCATED</b> ✅\n\n"
+            f"<blockquote>🌍 COUNTRY: <code>{country_flag} {country_name}</code></blockquote>\n"
+            f"<blockquote>📱 SERVICE: <code>{last_service}</code></blockquote>\n"
+            f"<blockquote>📞 NUMBER: <code>+{clean_num}</code></blockquote>\n\n"
+            f"<b>📩 SMS STATUS: ⏳ WAITING...</b>"
+        )
+        
+        new_buttons = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🔄 CHANGE NUMBER", callback_data=f"change_number_{uid}"),
+                InlineKeyboardButton("🌏 CHANGE COUNTRY", callback_data=f"change_country_{uid}")
+            ],
+            [InlineKeyboardButton("📢 OTP GROUP", url="https://t.me/sure_otp_suppor")]
+        ])
+        
+        await query.message.edit_text(
+            new_number_msg, 
+            parse_mode="HTML", 
+            reply_markup=new_buttons
+        )
+        return
+
+    # ============ CHANGE COUNTRY BUTTON ============
+    if data.startswith("change_country_"):
+        user_id = int(data.replace("change_country_", ""))
+        
+        if uid not in user_last_data:
+            await query.message.reply_text(
+                "❌ আপনার আগের ডেটা পাওয়া যায়নি। দয়া করে নতুন করে GET NUMBER করুন।",
+                reply_markup=main_keyboard(uid)
+            )
+            return
+        
+        last_data = user_last_data[uid]
+        last_service = last_data.get("last_service", "")
+        
+        if not last_service:
+            await query.message.reply_text(
+                "❌ সার্ভিস তথ্য পাওয়া যায়নি। দয়া করে নতুন করে GET NUMBER করুন।",
+                reply_markup=main_keyboard(uid)
+            )
+            return
+        
+        services = load_custom_services()
+        if not services:
+            await query.message.edit_text(
+                "⚠️ <b>দুঃখিত, এই মুহূর্তে কোনো সার্ভিস উপলব্ধ নেই।</b>",
+                parse_mode="HTML",
+                reply_markup=main_keyboard(uid)
+            )
+            return
+        
+        target_service = None
+        target_idx = 0
+        for idx, svc in enumerate(services):
+            if svc.get("sid", "").upper() == last_service.upper():
+                target_service = svc
+                target_idx = idx
+                break
+        
+        if not target_service:
+            target_service = services[0]
+            target_idx = 0
+        
+        ranges = target_service.get("ranges", [])
+        if not ranges:
+            await query.message.edit_text(
+                f"❌ <b>No ranges available for {last_service}</b>\n\n"
+                f"অন্য সার্ভিস নির্বাচন করুন।",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 BACK TO SERVICES", callback_data="back_services")
+                ]])
+            )
+            return
+        
+        context.user_data["la_services"] = services
+        context.user_data["la_svc_idx"] = target_idx
+        context.user_data["la_sid"] = target_service.get("sid", "")
+        context.user_data["la_ranges"] = ranges
+        
+        keyboard = _build_countries_keyboard(ranges, target_idx)
+        
+        await query.message.edit_text(
+            f"📞 <b>CHANGE COUNTRY</b>\n\n"
+            f"<blockquote>📱 Service: <b>{html.escape(target_service.get('sid', ''))}</b></blockquote>\n"
+            f"<blockquote>🌍 আপনার পছন্দের <b>Country</b> সিলেক্ট করুন:</blockquote>",
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+        return
+
+    # ============ ADMIN ROUTING ============
     if data == "adm_menu_back_to_admin":
         admin_text = get_admin_panel_text()
         await query.message.edit_text(
@@ -2211,6 +2670,131 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # ============ NEW: OTP Group Management ============
+    if data == "admin_otp_group_menu":
+        groups = load_otp_groups()
+        text = f"📢 <b>OTP GROUP MANAGEMENT</b>\n───────────────────\n📊 Total Groups: <code>{len(groups)}</code>\n\n"
+        for idx, gid in enumerate(groups, 1):
+            is_default = "⭐" if gid in DEFAULT_OTP_GROUPS else ""
+            text += f"{is_default} Group {idx}: <code>{gid}</code>\n"
+        await query.message.edit_text(
+            text,
+            parse_mode="HTML",
+            reply_markup=build_otp_group_management_keyboard()
+        )
+        return
+
+    if data == "admin_otp_group_add":
+        context.user_data["admin_state"] = "waiting_for_otp_group_add"
+        await query.message.edit_text(
+            "➕ <b>ADD OTP GROUP</b>\n\n"
+            "Please send the Group ID (e.g., <code>-1004374381669</code>)\n\n"
+            "<i>You can get the Group ID by adding @getmyid_bot to your group.</i>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("❌ CANCEL", callback_data="admin_otp_group_menu")
+            ]])
+        )
+        return
+
+    if data.startswith("admin_otp_group_detail_"):
+        idx = int(data.replace("admin_otp_group_detail_", ""))
+        groups = load_otp_groups()
+        if idx <= len(groups):
+            group_id = groups[idx - 1]
+            is_default = "⭐" if group_id in DEFAULT_OTP_GROUPS else ""
+            text = f"📢 <b>OTP GROUP DETAIL</b>\n───────────────────\n"
+            text += f"ID: <code>{group_id}</code>\n"
+            text += f"Status: {'⭐ Default' if is_default else '🟢 Active'}\n"
+            await query.message.edit_text(
+                text,
+                parse_mode="HTML",
+                reply_markup=build_otp_group_detail_keyboard(idx)
+            )
+        return
+
+    if data.startswith("admin_otp_group_remove_"):
+        idx = int(data.replace("admin_otp_group_remove_", ""))
+        groups = load_otp_groups()
+        if idx <= len(groups):
+            group_id = groups[idx - 1]
+            if group_id not in DEFAULT_OTP_GROUPS:
+                if remove_otp_group(group_id):
+                    await query.answer("✅ Group removed!", show_alert=True)
+                    await query.message.edit_text(
+                        f"✅ OTP Group <code>{group_id}</code> removed successfully!",
+                        parse_mode="HTML",
+                        reply_markup=build_otp_group_management_keyboard()
+                    )
+                else:
+                    await query.answer("❌ Failed to remove!", show_alert=True)
+            else:
+                await query.answer("❌ Cannot remove default group!", show_alert=True)
+        return
+
+    # ============ NEW: Admin Management ============
+    if data == "admin_admin_management":
+        admins = load_admins()
+        text = f"👑 <b>ADMIN MANAGEMENT</b>\n───────────────────\n👑 Total Admins: <code>{len(admins)}</code>\n\n"
+        for idx, aid in enumerate(admins, 1):
+            is_default = "⭐" if aid in DEFAULT_ADMINS else ""
+            text += f"{is_default} Admin {idx}: <code>{aid}</code>\n"
+        await query.message.edit_text(
+            text,
+            parse_mode="HTML",
+            reply_markup=build_admin_management_keyboard()
+        )
+        return
+
+    if data == "admin_admin_add":
+        context.user_data["admin_state"] = "waiting_for_admin_add"
+        await query.message.edit_text(
+            "➕ <b>ADD ADMIN</b>\n\n"
+            "Please send the Telegram User ID:\n\n"
+            "<i>You can get User ID from @userinfobot</i>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("❌ CANCEL", callback_data="admin_admin_management")
+            ]])
+        )
+        return
+
+    if data.startswith("admin_admin_detail_"):
+        idx = int(data.replace("admin_admin_detail_", ""))
+        admins = load_admins()
+        if idx <= len(admins):
+            admin_id = admins[idx - 1]
+            is_default = "⭐" if admin_id in DEFAULT_ADMINS else ""
+            text = f"👑 <b>ADMIN DETAIL</b>\n───────────────────\n"
+            text += f"ID: <code>{admin_id}</code>\n"
+            text += f"Status: {'⭐ Default' if is_default else '🟢 Active'}\n"
+            await query.message.edit_text(
+                text,
+                parse_mode="HTML",
+                reply_markup=build_admin_detail_keyboard(idx)
+            )
+        return
+
+    if data.startswith("admin_admin_remove_"):
+        idx = int(data.replace("admin_admin_remove_", ""))
+        admins = load_admins()
+        if idx <= len(admins):
+            admin_id = admins[idx - 1]
+            if admin_id not in DEFAULT_ADMINS:
+                if remove_admin(admin_id):
+                    await query.answer("✅ Admin removed!", show_alert=True)
+                    await query.message.edit_text(
+                        f"✅ Admin <code>{admin_id}</code> removed successfully!",
+                        parse_mode="HTML",
+                        reply_markup=build_admin_management_keyboard()
+                    )
+                else:
+                    await query.answer("❌ Failed to remove!", show_alert=True)
+            else:
+                await query.answer("❌ Cannot remove default admin!", show_alert=True)
+        return
+
+    # ============ USER MANAGEMENT ============
     if data == "adm_usermgnt_broadcast":
         context.user_data["broadcast_mode"] = True
         await query.message.edit_text(
@@ -2243,6 +2827,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("No data.")
         return
 
+    # ============ SYSTEM CONFIG ============
     if data == "adm_sys_stats":
         t_n, t_o, s_n, s_o, tot_n, tot_o = get_global_system_stats()
         msg = (
@@ -2311,6 +2896,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # ============ MANAGE SERVICES ============
     if data == "manage_svc_back_to_list":
         kb = build_manage_services_inline_keyboard()
         await query.message.edit_text(
@@ -2408,7 +2994,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ====== FIXED: ADD RANGE WITH API KEY SELECTION ======
     if data.startswith("manage_svc_add_range_"):
         parts = data.replace("manage_svc_add_range_", "").split("_", 1)
         svc_name = parts[0]
@@ -2418,7 +3003,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["temp_target_service"] = svc_name
         context.user_data["temp_target_country"] = country_name
         
-        # API Key selection buttons
         api_buttons = [
             [InlineKeyboardButton("🔑 API Key 01", callback_data=f"api_sel_range_01_{svc_name}")],
             [InlineKeyboardButton("🔑 API Key 02", callback_data=f"api_sel_range_02_{svc_name}")],
@@ -2436,12 +3020,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # API Key selection callbacks
     if data.startswith("api_sel_range_01_"):
         svc_name = data.replace("api_sel_range_01_", "")
         context.user_data["selected_api_key"] = "API_KEY_01"
         context.user_data["temp_target_service"] = svc_name
-        # Set admin_state to wait for range input
         context.user_data["admin_state"] = "waiting_for_add_range_inline"
         await query.message.edit_text(
             f"✅ Selected: <b>API Key 01</b>\n\n"
@@ -2457,7 +3039,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         svc_name = data.replace("api_sel_range_02_", "")
         context.user_data["selected_api_key"] = "API_KEY_02"
         context.user_data["temp_target_service"] = svc_name
-        # Set admin_state to wait for range input
         context.user_data["admin_state"] = "waiting_for_add_range_inline"
         await query.message.edit_text(
             f"✅ Selected: <b>API Key 02</b>\n\n"
@@ -2578,7 +3159,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # USER BOT CALLBACKS
+    # ============ USER BOT CALLBACKS ============
     if data.startswith("svc_"):
         idx = int(data.replace("svc_", ""))
         services = context.user_data.get("la_services", [])
