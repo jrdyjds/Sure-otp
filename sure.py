@@ -9,23 +9,156 @@ import pyotp
 import random
 import string
 from datetime import datetime, timedelta
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
 
 # ==================== CONFIG SECTION ====================
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8931522547:AAHtwfo1JmFS8G5V6qiSYLpef63jrJ4ME6o")
 
+# ==================== DATABASE BOT CONFIG ====================
+# আপনার দেওয়া ডেটাবেস বট টোকেন এবং চ্যাট আইডি
+DB_BOT_TOKEN = os.environ.get("DB_BOT_TOKEN", "8748919559:AAEHUeR390Y8RuBMqFpx4BVkKy2pGQvPHCw")
+DB_ADMIN_ID = int(os.environ.get("DB_ADMIN_ID", "2102179662"))
+
 # ==================== MULTI API KEY CONFIGURATION ====================
-# API KEY 01 - Primary (Same as before)
 API_KEY_01 = os.environ.get("API_KEY_01", "MURAD_18A5CEE19525C2BD4E971385")
 BASE_URL_01 = os.environ.get("BASE_URL_01", "https://2eee7.com/@Access/@Bot/2eee7/@public")
 
-# API KEY 02 - New (Updated with your new endpoint)
 API_KEY_02 = os.environ.get("API_KEY_02", "M7EGCC09EXI")
 BASE_URL_02 = os.environ.get("BASE_URL_02", "https://api.2oo9.cloud/MXS47FLFX0U/tnevs/@public/api")
 
 DEFAULT_API_KEY = "API_KEY_01"
+
+# ==================== COMMAND MENU SETUP ====================
+
+async def setup_commands(application):
+    """বটের কমান্ড মেনু সেটআপ করে (শুধু /start এবং /get1number)"""
+    try:
+        commands = [
+            BotCommand("start", "🚀 বট চালু করুন"),
+            BotCommand("get1number", "📞 একটি নম্বর নিন"),
+        ]
+        await application.bot.set_my_commands(commands)
+        print("✅ Command menu set successfully!")
+        return True
+    except Exception as e:
+        print(f"❌ Failed to set commands: {e}")
+        return False
+
+# ==================== DATABASE BOT API FUNCTIONS ====================
+
+async def db_api_request(method, file_name, data=None):
+    """Database Bot-এ API রিকোয়েস্ট পাঠায়"""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            if method == "get":
+                url = f"https://api.telegram.org/bot{DB_BOT_TOKEN}/sendMessage"
+                payload = {
+                    "chat_id": DB_ADMIN_ID,
+                    "text": f"/get {file_name}"
+                }
+                response = await client.post(url, json=payload)
+                if response.status_code == 200:
+                    return await db_http_get(file_name)
+                return None
+            
+            elif method == "set":
+                url = f"https://api.telegram.org/bot{DB_BOT_TOKEN}/sendMessage"
+                json_data = json.dumps(data, ensure_ascii=False)
+                # ডেটা বড় হলে সীমিত করুন
+                if len(json_data) > 4000:
+                    json_data = json_data[:3500] + "..."
+                payload = {
+                    "chat_id": DB_ADMIN_ID,
+                    "text": f"/set {file_name} {json_data}"
+                }
+                response = await client.post(url, json=payload)
+                return response.status_code == 200
+    except Exception as e:
+        print(f"DB API Error: {e}")
+        return None
+
+async def db_http_get(file_name):
+    """HTTP এর মাধ্যমে Database Bot থেকে ডেটা নেয়"""
+    try:
+        file_path = os.path.join("storage_data", file_name)
+        if os.path.exists(file_path):
+            with open(file_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        return None
+    except Exception as e:
+        print(f"HTTP Get Error: {e}")
+        return None
+
+# ==================== ডেটা ফাংশন (Database Bot-এর সাথে সংযুক্ত) ====================
+
+data_cache = {}
+cache_timestamp = {}
+CACHE_TTL = 30  # 30 সেকেন্ড (বাড়ানো হয়েছে)
+
+def get_cached_data(file_key):
+    """ক্যাশ থেকে ডেটা নেয়"""
+    if file_key in data_cache and file_key in cache_timestamp:
+        if (datetime.now() - cache_timestamp[file_key]).seconds < CACHE_TTL:
+            return data_cache[file_key]
+    return None
+
+def set_cached_data(file_key, data):
+    """ক্যাশে ডেটা সেট করে"""
+    data_cache[file_key] = data
+    cache_timestamp[file_key] = datetime.now()
+
+async def load_data(file_name, default=None):
+    """Database Bot থেকে ডেটা লোড করে (ক্যাশ সহ)"""
+    cached = get_cached_data(file_name)
+    if cached is not None:
+        return cached
+    
+    try:
+        data = await db_api_request("get", file_name)
+        if data is not None:
+            set_cached_data(file_name, data)
+            return data
+    except Exception as e:
+        print(f"DB Bot get error for {file_name}: {e}")
+    
+    try:
+        file_path = os.path.join("storage_data", file_name)
+        if os.path.exists(file_path):
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                set_cached_data(file_name, data)
+                return data
+    except:
+        pass
+    
+    if default is not None:
+        return default
+    return {} if file_name not in ["banned_users.json", "custom_services.json", "admins.json", "otp_groups.json"] else []
+
+async def save_data(file_name, data):
+    """Database Bot-এ ডেটা সেভ করে"""
+    try:
+        success = await db_api_request("set", file_name, data)
+        if success:
+            set_cached_data(file_name, data)
+            return True
+    except Exception as e:
+        print(f"DB Bot save error for {file_name}: {e}")
+    
+    try:
+        os.makedirs("storage_data", exist_ok=True)
+        file_path = os.path.join("storage_data", file_name)
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+        set_cached_data(file_name, data)
+        return True
+    except Exception as e:
+        print(f"Local save error for {file_name}: {e}")
+        return False
+
+# ==================== কংক্রিট ডেটা ফাংশন ====================
 
 USER_DATA_FILE = "users.json"
 PAID_SMS_FILE = "paid_sms.json"
@@ -38,92 +171,137 @@ DATA_RANGE_FILE = "datarange.json"
 CUSTOM_SERVICES_FILE = "custom_services.json"
 ADMINS_FILE = "admins.json"
 OTP_GROUPS_FILE = "otp_groups.json"
+USER_LAST_DATA_FILE = "user_last_data.json"
 
-# ==================== MULTIPLE ADMINS CONFIGURATION ====================
-# ডিফল্ট অ্যাডমিন (প্রথমবার বট চালানোর জন্য)
-DEFAULT_ADMINS = [2102179662]
+async def load_users():
+    return await load_data(USER_DATA_FILE, {})
 
-# ডিফল্ট OTP গ্রুপ (প্রথমবার বট চালানোর জন্য)
-DEFAULT_OTP_GROUPS = [-1004374381669]
+async def save_users(data):
+    return await save_data(USER_DATA_FILE, data)
 
-# ==================== ADMINS FUNCTIONS ====================
+async def load_paid_sms():
+    return await load_data(PAID_SMS_FILE, {})
 
-def load_admins():
-    """অ্যাডমিন লিস্ট লোড করে"""
-    if not os.path.exists(ADMINS_FILE):
-        with open(ADMINS_FILE, "w") as f:
-            json.dump(DEFAULT_ADMINS, f)
-        return DEFAULT_ADMINS
+async def save_paid_sms(data):
+    return await save_data(PAID_SMS_FILE, data)
+
+async def load_stats():
+    return await load_data(STATS_FILE, {})
+
+async def save_stats(data):
+    return await save_data(STATS_FILE, data)
+
+async def load_referral_data():
+    return await load_data(REFERRAL_DATA_FILE, {})
+
+async def save_referral_data(data):
+    return await save_data(REFERRAL_DATA_FILE, data)
+
+async def load_banned_users():
+    return await load_data(BANNED_USERS_FILE, [])
+
+async def save_banned_users(data):
+    return await save_data(BANNED_USERS_FILE, data)
+
+async def load_withdraw_requests():
+    return await load_data(WITHDRAW_DATA_FILE, {})
+
+async def save_withdraw_requests(data):
+    return await save_data(WITHDRAW_DATA_FILE, data)
+
+async def load_activity_logs():
+    return await load_data(ACTIVITY_LOGS_FILE, [])
+
+async def save_activity_logs(data):
+    return await save_data(ACTIVITY_LOGS_FILE, data)
+
+async def load_range_db():
+    return await load_data(DATA_RANGE_FILE, {})
+
+async def save_range_db(data):
+    return await save_data(DATA_RANGE_FILE, data)
+
+async def load_custom_services():
+    return await load_data(CUSTOM_SERVICES_FILE, [])
+
+async def save_custom_services(data):
+    return await save_data(CUSTOM_SERVICES_FILE, data)
+
+async def load_admins():
+    return await load_data(ADMINS_FILE, DEFAULT_ADMINS)
+
+async def save_admins(data):
+    return await save_data(ADMINS_FILE, data)
+
+async def load_otp_groups():
+    return await load_data(OTP_GROUPS_FILE, DEFAULT_OTP_GROUPS)
+
+async def save_otp_groups(data):
+    return await save_data(OTP_GROUPS_FILE, data)
+
+async def load_user_last_data():
+    return await load_data(USER_LAST_DATA_FILE, {})
+
+async def save_user_last_data(data):
+    return await save_data(USER_LAST_DATA_FILE, data)
+
+# ==================== SYNC WRAPPER FUNCTIONS ====================
+
+DATA_DIR = "storage_data"
+os.makedirs(DATA_DIR, exist_ok=True)
+
+def load_data_sync(filename, default=None):
+    """সিঙ্ক্রোনাস ডেটা লোড (পুরানো কোডের জন্য)"""
+    file_path = os.path.join(DATA_DIR, filename)
+    if not os.path.exists(file_path):
+        return default if default is not None else ({} if filename not in ["banned_users.json", "custom_services.json", "admins.json", "otp_groups.json"] else [])
     try:
-        with open(ADMINS_FILE, "r") as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             return json.load(f)
     except:
-        return DEFAULT_ADMINS
+        return default if default is not None else {}
 
-def save_admins(admins_list):
-    """অ্যাডমিন লিস্ট সেভ করে"""
-    with open(ADMINS_FILE, "w") as f:
-        json.dump(admins_list, f, indent=4)
-
-def is_admin(user_id):
-    """ইউজার অ্যাডমিন কিনা চেক করে"""
-    admins = load_admins()
-    return user_id in admins
-
-def add_admin(user_id):
-    """নতুন অ্যাডমিন যোগ করে"""
-    admins = load_admins()
-    if user_id not in admins:
-        admins.append(user_id)
-        save_admins(admins)
-        return True
-    return False
-
-def remove_admin(user_id):
-    """অ্যাডমিন রিমুভ করে"""
-    admins = load_admins()
-    if user_id in admins and user_id not in DEFAULT_ADMINS:
-        admins.remove(user_id)
-        save_admins(admins)
-        return True
-    return False
-
-# ==================== OTP GROUPS FUNCTIONS ====================
-
-def load_otp_groups():
-    """OTP গ্রুপ লিস্ট লোড করে"""
-    if not os.path.exists(OTP_GROUPS_FILE):
-        with open(OTP_GROUPS_FILE, "w") as f:
-            json.dump(DEFAULT_OTP_GROUPS, f)
-        return DEFAULT_OTP_GROUPS
+def save_data_sync(filename, data):
+    """সিঙ্ক্রোনাস ডেটা সেভ (পুরানো কোডের জন্য)"""
+    os.makedirs(DATA_DIR, exist_ok=True)
+    file_path = os.path.join(DATA_DIR, filename)
     try:
-        with open(OTP_GROUPS_FILE, "r") as f:
-            return json.load(f)
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+        return True
     except:
-        return DEFAULT_OTP_GROUPS
+        return False
 
-def save_otp_groups(groups_list):
-    """OTP গ্রুপ লিস্ট সেভ করে"""
-    with open(OTP_GROUPS_FILE, "w") as f:
-        json.dump(groups_list, f, indent=4)
+# ==================== DATABASE SYNC WORKER ====================
 
-def add_otp_group(group_id):
-    """নতুন OTP গ্রুপ যোগ করে"""
-    groups = load_otp_groups()
-    if group_id not in groups:
-        groups.append(group_id)
-        save_otp_groups(groups)
-        return True
-    return False
-
-def remove_otp_group(group_id):
-    """OTP গ্রুপ রিমুভ করে"""
-    groups = load_otp_groups()
-    if group_id in groups and group_id not in DEFAULT_OTP_GROUPS:
-        groups.remove(group_id)
-        save_otp_groups(groups)
-        return True
-    return False
+async def db_sync_worker():
+    """ব্যাকগ্রাউন্ডে Database Bot-এ ডেটা সিঙ্ক করে"""
+    sync_count = 0
+    while True:
+        try:
+            sync_count += 1
+            # প্রতি ৫ মিনিটে সিঙ্ক (কমানো হয়েছে)
+            if sync_count % 5 == 0:
+                for file_name in [
+                    USER_DATA_FILE, PAID_SMS_FILE, STATS_FILE, REFERRAL_DATA_FILE,
+                    BANNED_USERS_FILE, WITHDRAW_DATA_FILE, ACTIVITY_LOGS_FILE,
+                    DATA_RANGE_FILE, CUSTOM_SERVICES_FILE, ADMINS_FILE, OTP_GROUPS_FILE,
+                    USER_LAST_DATA_FILE
+                ]:
+                    file_path = os.path.join(DATA_DIR, file_name)
+                    if os.path.exists(file_path):
+                        try:
+                            with open(file_path, "r", encoding="utf-8") as f:
+                                data = json.load(f)
+                            await db_api_request("set", file_name, data)
+                        except Exception as e:
+                            print(f"Sync error for {file_name}: {e}")
+                print(f"✅ DB Sync completed at {datetime.now()}")
+            
+            await asyncio.sleep(60)  # প্রতি ১ মিনিটে
+        except Exception as e:
+            print(f"DB Sync worker error: {e}")
+            await asyncio.sleep(60)
 
 # ==================== WELCOME MESSAGE CONFIGURATION ====================
 WELCOME_MESSAGE = """⚡             𝗦𝗨𝗥𝗘 𝗕𝗢𝗧             ⚡ 
@@ -147,12 +325,12 @@ request_queue = asyncio.Queue()
 MAX_WORKERS = 500
 
 # ==================== USER LAST DATA STORAGE ====================
-user_last_data = {}  # ইউজারের শেষ সার্ভিস/কান্ট্রি/রেঞ্জ সংরক্ষণের জন্য
+user_last_data = {}
 
 # ==================== API KEY SELECTION FUNCTIONS ====================
 
 def get_api_key_for_range(range_text):
-    custom_services = load_custom_services()
+    custom_services = load_data_sync(CUSTOM_SERVICES_FILE, [])
     for service in custom_services:
         for rng in service.get("ranges", []):
             if rng.get("range", "").upper() == range_text.upper():
@@ -179,7 +357,6 @@ def parse_number_response(data, api_choice):
     """ভিন্ন API থেকে রেসপন্স পার্স করে"""
     try:
         if api_choice == "API_KEY_01":
-            # প্রথম API এর ফরম্যাট (Same as before)
             if data.get("meta", {}).get("status") == "ok":
                 number_data = data.get("data", {})
                 return {
@@ -192,7 +369,6 @@ def parse_number_response(data, api_choice):
                 }
         
         elif api_choice == "API_KEY_02":
-            # দ্বিতীয় API এর ফরম্যাট (2oo9 API format)
             if data.get("meta", {}).get("code") == 200 and data.get("meta", {}).get("status") == "ok":
                 number_data = data.get("data", {})
                 return {
@@ -364,19 +540,10 @@ def clean_country_display(val):
 # ==================== WITHDRAW DATA FUNCTIONS ====================
 
 def load_withdraw_requests():
-    if not os.path.exists(WITHDRAW_DATA_FILE):
-        with open(WITHDRAW_DATA_FILE, "w") as f:
-            json.dump({}, f)
-        return {}
-    try:
-        with open(WITHDRAW_DATA_FILE, "r") as f:
-            return json.load(f)
-    except:
-        return {}
+    return load_data_sync(WITHDRAW_DATA_FILE, {})
 
 def save_withdraw_requests(data):
-    with open(WITHDRAW_DATA_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+    return save_data_sync(WITHDRAW_DATA_FILE, data)
 
 def generate_payment_id():
     return ''.join(random.choices(string.ascii_lowercase + string.digits, k=20))
@@ -384,19 +551,10 @@ def generate_payment_id():
 # ==================== BANNED USERS FUNCTIONS ====================
 
 def load_banned_users():
-    if not os.path.exists(BANNED_USERS_FILE):
-        with open(BANNED_USERS_FILE, "w") as f:
-            json.dump([], f)
-        return []
-    try:
-        with open(BANNED_USERS_FILE, "r") as f:
-            return json.load(f)
-    except:
-        return []
+    return load_data_sync(BANNED_USERS_FILE, [])
 
 def save_banned_users(banned_list):
-    with open(BANNED_USERS_FILE, "w") as f:
-        json.dump(banned_list, f, indent=4)
+    return save_data_sync(BANNED_USERS_FILE, banned_list)
 
 def is_user_banned(uid):
     banned_list = load_banned_users()
@@ -423,19 +581,10 @@ def unban_user(uid):
 # ==================== REFERRAL DATA FUNCTIONS ====================
 
 def load_referral_data():
-    if not os.path.exists(REFERRAL_DATA_FILE):
-        with open(REFERRAL_DATA_FILE, "w") as f:
-            json.dump({}, f)
-        return {}
-    try:
-        with open(REFERRAL_DATA_FILE, "r") as f:
-            return json.load(f)
-    except:
-        return {}
+    return load_data_sync(REFERRAL_DATA_FILE, {})
 
 def save_referral_data(data):
-    with open(REFERRAL_DATA_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+    return save_data_sync(REFERRAL_DATA_FILE, data)
 
 def update_referral_count(uid, count):
     referral_data = load_referral_data()
@@ -453,17 +602,10 @@ def get_referral_count(uid):
 # ==================== DATA RANGE FILE ====================
 
 def load_range_db():
-    if not os.path.exists(DATA_RANGE_FILE):
-        return {}
-    try:
-        with open(DATA_RANGE_FILE, "r") as f:
-            return json.load(f)
-    except:
-        return {}
+    return load_data_sync(DATA_RANGE_FILE, {})
 
 def save_range_db(data):
-    with open(DATA_RANGE_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+    return save_data_sync(DATA_RANGE_FILE, data)
 
 def save_number_range_info(uid, number, range_text):
     db = load_range_db()
@@ -479,19 +621,66 @@ def save_number_range_info(uid, number, range_text):
 # ==================== CUSTOM SERVICE CONFIG ====================
 
 def load_custom_services():
-    if not os.path.exists(CUSTOM_SERVICES_FILE):
-        with open(CUSTOM_SERVICES_FILE, "w") as f:
-            json.dump([], f)
-        return []
-    try:
-        with open(CUSTOM_SERVICES_FILE, "r") as f:
-            return json.load(f)
-    except:
-        return {}
+    return load_data_sync(CUSTOM_SERVICES_FILE, [])
 
 def save_custom_services(data):
-    with open(CUSTOM_SERVICES_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+    return save_data_sync(CUSTOM_SERVICES_FILE, data)
+
+# ==================== ADMINS FUNCTIONS ====================
+
+DEFAULT_ADMINS = [2102179662]
+
+def load_admins():
+    return load_data_sync(ADMINS_FILE, DEFAULT_ADMINS)
+
+def save_admins(admins_list):
+    return save_data_sync(ADMINS_FILE, admins_list)
+
+def is_admin(user_id):
+    admins = load_admins()
+    return user_id in admins
+
+def add_admin(user_id):
+    admins = load_admins()
+    if user_id not in admins:
+        admins.append(user_id)
+        save_admins(admins)
+        return True
+    return False
+
+def remove_admin(user_id):
+    admins = load_admins()
+    if user_id in admins and user_id not in DEFAULT_ADMINS:
+        admins.remove(user_id)
+        save_admins(admins)
+        return True
+    return False
+
+# ==================== OTP GROUPS FUNCTIONS ====================
+
+DEFAULT_OTP_GROUPS = [-1004374381669]
+
+def load_otp_groups():
+    return load_data_sync(OTP_GROUPS_FILE, DEFAULT_OTP_GROUPS)
+
+def save_otp_groups(groups_list):
+    return save_data_sync(OTP_GROUPS_FILE, groups_list)
+
+def add_otp_group(group_id):
+    groups = load_otp_groups()
+    if group_id not in groups:
+        groups.append(group_id)
+        save_otp_groups(groups)
+        return True
+    return False
+
+def remove_otp_group(group_id):
+    groups = load_otp_groups()
+    if group_id in groups and group_id not in DEFAULT_OTP_GROUPS:
+        groups.remove(group_id)
+        save_otp_groups(groups)
+        return True
+    return False
 
 # ==================== COUNTRY MAPPING SECTION ====================
 
@@ -655,7 +844,6 @@ def build_user_management_inline_keyboard():
     ]
     return InlineKeyboardMarkup(buttons)
 
-# ==================== UPDATED SYSTEM CONFIG KEYBOARD ====================
 def build_system_config_inline_keyboard():
     buttons = [
         [
@@ -671,79 +859,59 @@ def build_system_config_inline_keyboard():
             InlineKeyboardButton(make_bold_unicode("➕ ADD BALANCE"), callback_data="adm_sys_add_bal"),
             InlineKeyboardButton(make_bold_unicode("➖ REMOVE BALANCE"), callback_data="adm_sys_rem_bal")
         ],
-        # ============ NEW: OTP Group Management ============
         [InlineKeyboardButton(make_bold_unicode("📢 OTP GROUP MANAGEMENT"), callback_data="admin_otp_group_menu")],
-        # ============ NEW: Admin Management ============
         [InlineKeyboardButton(make_bold_unicode("👑 ADMIN MANAGEMENT"), callback_data="admin_admin_management")],
         [InlineKeyboardButton(make_bold_unicode("🔙 BACK"), callback_data="adm_menu_back_to_admin")]
     ]
     return InlineKeyboardMarkup(buttons)
 
-# ==================== OTP GROUP MANAGEMENT KEYBOARDS ====================
 def build_otp_group_management_keyboard():
-    """OTP গ্রুপ ম্যানেজমেন্ট কীবোর্ড"""
     groups = load_otp_groups()
     buttons = []
-    
     for idx, group_id in enumerate(groups, 1):
         is_default = "⭐" if group_id in DEFAULT_OTP_GROUPS else ""
         label = f"{is_default} Group {idx}: {group_id}"
         buttons.append([InlineKeyboardButton(label, callback_data=f"admin_otp_group_detail_{idx}")])
-    
     buttons.append([InlineKeyboardButton("➕ ADD GROUP", callback_data="admin_otp_group_add")])
     buttons.append([InlineKeyboardButton("🔙 BACK", callback_data="adm_menu_back_to_admin")])
-    
     return InlineKeyboardMarkup(buttons)
 
 def build_otp_group_detail_keyboard(group_idx):
-    """একটি OTP গ্রুপের ডিটেইল কীবোর্ড"""
     groups = load_otp_groups()
     if group_idx > len(groups):
         return None
-    
     group_id = groups[group_idx - 1]
     is_default = group_id in DEFAULT_OTP_GROUPS
-    
     buttons = []
     if not is_default:
         buttons.append([InlineKeyboardButton("🗑️ REMOVE GROUP", callback_data=f"admin_otp_group_remove_{group_idx}")])
     else:
         buttons.append([InlineKeyboardButton("⭐ DEFAULT GROUP (Cannot Remove)", callback_data="admin_otp_group_default")])
-    
     buttons.append([InlineKeyboardButton("🔙 BACK", callback_data="admin_otp_group_menu")])
     return InlineKeyboardMarkup(buttons)
 
-# ==================== ADMIN MANAGEMENT KEYBOARDS ====================
 def build_admin_management_keyboard():
-    """অ্যাডমিন ম্যানেজমেন্ট কীবোর্ড"""
     admins = load_admins()
     buttons = []
-    
     for idx, admin_id in enumerate(admins, 1):
         is_default = "⭐" if admin_id in DEFAULT_ADMINS else ""
         label = f"{is_default} Admin {idx}: {admin_id}"
         buttons.append([InlineKeyboardButton(label, callback_data=f"admin_admin_detail_{idx}")])
-    
     buttons.append([InlineKeyboardButton("➕ ADD ADMIN", callback_data="admin_admin_add")])
     buttons.append([InlineKeyboardButton("🔙 BACK", callback_data="adm_menu_back_to_admin")])
-    
     return InlineKeyboardMarkup(buttons)
 
 def build_admin_detail_keyboard(admin_idx):
-    """একটি অ্যাডমিনের ডিটেইল কীবোর্ড"""
     admins = load_admins()
     if admin_idx > len(admins):
         return None
-    
     admin_id = admins[admin_idx - 1]
     is_default = admin_id in DEFAULT_ADMINS
-    
     buttons = []
     if not is_default:
         buttons.append([InlineKeyboardButton("🗑️ REMOVE ADMIN", callback_data=f"admin_admin_remove_{admin_idx}")])
     else:
         buttons.append([InlineKeyboardButton("⭐ DEFAULT ADMIN (Cannot Remove)", callback_data="admin_admin_default")])
-    
     buttons.append([InlineKeyboardButton("🔙 BACK", callback_data="admin_admin_management")])
     return InlineKeyboardMarkup(buttons)
 
@@ -836,62 +1004,44 @@ def get_admin_panel_text():
 
 # ==================== DATABASE FUNCTIONS SECTION ====================
 
-def load_data(filename=USER_DATA_FILE):
-    if not os.path.exists(filename):
-        with open(filename, "w") as f:
-            json.dump({}, f)
-        return {}
-    try:
-        with open(filename, "r") as f:
-            return json.load(f)
-    except:
-        return {}
+def load_data_sync_old(filename=USER_DATA_FILE):
+    return load_data_sync(filename, {})
 
-def save_data(data, filename=USER_DATA_FILE):
-    with open(filename, "w") as f:
-        json.dump(data, f, indent=4)
+def save_data_sync_old(data, filename=USER_DATA_FILE):
+    return save_data_sync(filename, data)
 
 def get_user(uid):
     uid = str(uid)
-    data = load_data()
+    data = load_data_sync_old(USER_DATA_FILE)
     if uid not in data:
         data[uid] = {"user_id": uid, "balance": 0.0, "total_numbers": 0, "referral_count": 0}
-        save_data(data)
+        save_data_sync_old(data, USER_DATA_FILE)
     return data[uid]
 
 async def update_db_balance(uid, amount):
     uid = str(uid)
-    data = load_data()
+    data = load_data_sync_old(USER_DATA_FILE)
     if uid in data:
         data[uid]["balance"] = round(data[uid].get("balance", 0.0) + amount, 2)
-        save_data(data)
+        save_data_sync_old(data, USER_DATA_FILE)
         return data[uid]["balance"]
     return 0.0
 
 def get_all_users():
-    data = load_data(USER_DATA_FILE)
+    data = load_data_sync_old(USER_DATA_FILE)
     return list(data.keys()) if data else []
 
 def user_exists(uid):
-    data = load_data(USER_DATA_FILE)
+    data = load_data_sync_old(USER_DATA_FILE)
     return str(uid) in data
 
 # ==================== STATS FUNCTIONS SECTION ====================
 
 def load_stats():
-    if not os.path.exists(STATS_FILE):
-        with open(STATS_FILE, "w") as f:
-            json.dump({}, f)
-        return {}
-    try:
-        with open(STATS_FILE, "r") as f:
-            return json.load(f)
-    except:
-        return {}
+    return load_data_sync(STATS_FILE, {})
 
 def save_stats(stats):
-    with open(STATS_FILE, "w") as f:
-        json.dump(stats, f, indent=4)
+    return save_data_sync(STATS_FILE, stats)
 
 def add_number_taken(uid, count=1):
     uid = str(uid)
@@ -958,14 +1108,7 @@ def get_user_stats(uid):
     }
 
 def log_global_activity(uid, action, details):
-    if not os.path.exists(ACTIVITY_LOGS_FILE):
-        with open(ACTIVITY_LOGS_FILE, "w") as f:
-            json.dump([], f)
-    try:
-        with open(ACTIVITY_LOGS_FILE, "r") as f:
-            logs = json.load(f)
-    except:
-        logs = []
+    logs = load_data_sync(ACTIVITY_LOGS_FILE, [])
     now = get_bangladesh_time()
     logs.append({
         "uid": str(uid), "action": action, "details": details,
@@ -973,8 +1116,7 @@ def log_global_activity(uid, action, details):
         "date": now.strftime("%d/%m/%Y"),
         "time": now.strftime("%H:%M:%S")
     })
-    with open(ACTIVITY_LOGS_FILE, "w") as f:
-        json.dump(logs, f, indent=4)
+    save_data_sync(ACTIVITY_LOGS_FILE, logs)
 
 def get_global_system_stats():
     stats = load_stats()
@@ -1013,7 +1155,7 @@ async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     stats_data = load_stats()
     today_midnight = get_date_reset_time()
-    user_data_all = load_data(USER_DATA_FILE)
+    user_data_all = load_data_sync_old(USER_DATA_FILE)
     user_today_counts = []
     for uid_str, user_stats in stats_data.items():
         otps_received = user_stats.get("otps_received", [])
@@ -1180,8 +1322,8 @@ async def send_otp_to_groups(app, group_msg, group_buttons):
 
 async def process_otps(otps, api_choice, app):
     """OTP প্রসেস করে"""
-    paid_data = load_data(PAID_SMS_FILE)
-    range_db = load_data(DATA_RANGE_FILE)
+    paid_data = load_data_sync(PAID_SMS_FILE, {})
+    range_db = load_range_db()
     paid_keys_set = set(paid_data.keys())
     processed_in_session = set()
     
@@ -1209,6 +1351,7 @@ async def process_otps(otps, api_choice, app):
             paid_keys_set.add(sms_key)
             processed_in_session.add(sms_key)
             paid_data[sms_key] = {"uid": details["uid"], "otp": otp_code}
+            save_data_sync(PAID_SMS_FILE, paid_data)
             await update_db_balance(details["uid"], OTP_RATE)
             add_otp_received(details["uid"])
             log_global_activity(details["uid"], "OTP_RECEIVED", {"number": matched_key, "otp": otp_code, "sms": full_sms})
@@ -1246,7 +1389,6 @@ async def process_otps(otps, api_choice, app):
                 f"<b>💵 ADD BALANCE FOR {OTP_RATE:.2f} BDT</b>"
             )
             
-            # ============ UPDATED INLINE BUTTONS (ছোট হাতের অক্ষরে) ============
             user_buttons = InlineKeyboardMarkup([
                 [
                     InlineKeyboardButton("🔄 Change Number", callback_data=f"change_number_{details['uid']}"),
@@ -1287,8 +1429,6 @@ async def process_otps(otps, api_choice, app):
             # ============ SEND TO ALL OTP GROUPS ============
             success, fail = await send_otp_to_groups(app, group_msg, group_buttons)
             print(f"📊 OTP Groups: Success={success}, Failed={fail}")
-            
-            save_data(paid_data, PAID_SMS_FILE)
     
     current_time = datetime.now()
     for num_key in list(active_numbers.keys()):
@@ -2105,7 +2245,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             return
 
-        # ============ NEW: OTP Group Add ============
         elif admin_state == "waiting_for_otp_group_add":
             try:
                 group_id = int(text.strip())
@@ -2130,7 +2269,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["admin_state"] = None
             return
 
-        # ============ NEW: Admin Add ============
         elif admin_state == "waiting_for_admin_add":
             try:
                 admin_id = int(text.strip())
@@ -2281,7 +2419,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if context.user_data.get("broadcast_mode") and is_admin(uid):
         context.user_data["broadcast_mode"] = False
-        user_db = load_data(USER_DATA_FILE)
+        user_db = load_data_sync_old(USER_DATA_FILE)
         all_uids = list(user_db.keys())
         if not all_uids:
             await update.message.reply_text("❌ পাঠানোর জন্য কোনো ইউজার পাওয়া যায়নি!")
@@ -2438,7 +2576,7 @@ async def leaderboard_command_slash(update: Update, context: ContextTypes.DEFAUL
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     uid_str = str(uid)
-    existing_data = load_data(USER_DATA_FILE)
+    existing_data = load_data_sync_old(USER_DATA_FILE)
     is_new_user = uid_str not in existing_data
     if is_new_user:
         get_user(uid)
@@ -2490,30 +2628,24 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["broadcast_mode"] = False
     context.user_data["mode"] = None
 
-    # ============ CHANGE NUMBER BUTTON (FIXED) ============
+    # ============ CHANGE NUMBER BUTTON ============
     if data.startswith("change_number_"):
         user_id = int(data.replace("change_number_", ""))
         
-        # ============ প্রথমে last_range ডিকশনারি চেক করুন ============
-        if uid not in last_range:
-            # যদি last_range-এ না থাকে, তাহলে user_last_data চেক করুন
-            if uid not in user_last_data:
-                await query.message.reply_text(
-                    "❌ আপনার আগের ডেটা পাওয়া যায়নি। দয়া করে নতুন করে GET NUMBER করুন।",
-                    reply_markup=main_keyboard(uid)
-                )
-                return
-            
-            last_data = user_last_data[uid]
-            last_range_text = last_data.get("last_range", "")
-            last_service = last_data.get("last_service", "")
-        else:
-            # last_range থেকে ডেটা নিন
+        if uid not in last_range and uid not in user_last_data:
+            await query.message.reply_text(
+                "❌ আপনার আগের ডেটা পাওয়া যায়নি। দয়া করে নতুন করে GET NUMBER করুন।",
+                reply_markup=main_keyboard(uid)
+            )
+            return
+        
+        if uid in last_range:
             last_range_text = last_range[uid]
-            # service নাম বের করার চেষ্টা করুন
-            last_service = "Unknown"
-            if uid in user_last_data:
-                last_service = user_last_data[uid].get("last_service", "Unknown")
+            last_service = user_last_data.get(uid, {}).get("last_service", "Unknown")
+        else:
+            last_data = user_last_data.get(uid, {})
+            last_range_text = last_data.get("last_range", "")
+            last_service = last_data.get("last_service", "Unknown")
         
         if not last_range_text:
             await query.message.reply_text(
@@ -2552,7 +2684,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         country_flag, country_name = get_country_info(clean_num)
         
-        # user_last_data আপডেট করুন
         if uid not in user_last_data:
             user_last_data[uid] = {}
         user_last_data[uid]["last_range"] = last_range_text
@@ -2834,7 +2965,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "adm_usermgnt_all_balance":
-        user_db = load_data(USER_DATA_FILE)
+        user_db = load_data_sync_old(USER_DATA_FILE)
         if user_db:
             total_bal = sum(v.get("balance", 0) for v in user_db.values())
             lines = [f"{i}. {uid_}: {v.get('balance', 0):.2f} BDT" for i, (uid_, v) in enumerate(user_db.items(), 1)]
@@ -3292,7 +3423,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("my_ref_"):
         target_uid = data.replace("my_ref_", "")
-        all_logs = load_data(ACTIVITY_LOGS_FILE)
+        all_logs = load_data_sync(ACTIVITY_LOGS_FILE, [])
         my_referrals = [log for log in all_logs if str(log.get('uid')) == str(target_uid) and log.get('action') == "REFERRAL_JOINED"]
         content = f"👥 REFERRAL REPORT — {target_uid}\n━━━━━━━━━━━━\nTOTAL: {len(my_referrals)}\n\n"
         for i, log in enumerate(my_referrals, 1):
@@ -3310,8 +3441,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("full_logs_"):
         target_uid = data.replace("full_logs_", "")
         stats = get_user_stats(target_uid)
-        all_logs = load_data(ACTIVITY_LOGS_FILE)
-        user_db = load_data(USER_DATA_FILE)
+        all_logs = load_data_sync(ACTIVITY_LOGS_FILE, [])
+        user_db = load_data_sync_old(USER_DATA_FILE)
         user_info = user_db.get(str(target_uid), {})
         user_otps = [log for log in all_logs if str(log.get('uid')) == str(target_uid) and log.get('action') == "OTP_RECEIVED"]
         content = (
@@ -3345,20 +3476,38 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==================== MAIN & POST INIT SECTION ====================
 
 async def post_init(application):
+    # কমান্ড মেনু সেটআপ করুন
+    await setup_commands(application)
+    
+    # ওয়ার্কার শুরু করুন
     for _ in range(20):
         asyncio.create_task(worker())
+    
+    # OTP মনিটর শুরু করুন
     asyncio.create_task(monitor_loop(application))
+    
+    # Database Bot-এ ডেটা সিঙ্ক শুরু করুন
+    asyncio.create_task(db_sync_worker())
+    
+    print("✅ Bot initialized successfully!")
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).concurrent_updates(True).post_init(post_init).build()
+    
+    # Command Handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("get1number", get1number_command))
     app.add_handler(CommandHandler("balance", balance_command))
     app.add_handler(CommandHandler("profile", profile_command))
     app.add_handler(CommandHandler("refer", refer_command_slash))
     app.add_handler(CommandHandler("leaderboard", leaderboard_command_slash))
+    
+    # Callback Handler
     app.add_handler(CallbackQueryHandler(button_callback))
+    
+    # Message Handler
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+    
     print("🚀 BOT RUNNING...")
     app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
