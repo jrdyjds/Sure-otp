@@ -16,10 +16,10 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Con
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8931522547:AAHtwfo1JmFS8G5V6qiSYLpef63jrJ4ME6o")
 
-# ==================== DATABASE BOT CONFIG ====================
-# আপনার দেওয়া ডেটাবেস বট টোকেন এবং চ্যাট আইডি
-DB_BOT_TOKEN = os.environ.get("DB_BOT_TOKEN", "8748919559:AAEHUeR390Y8RuBMqFpx4BVkKy2pGQvPHCw")
-DB_ADMIN_ID = int(os.environ.get("DB_ADMIN_ID", "2102179662"))
+# ==================== DATABASE API CONFIG ====================
+# ডেটাবেজ বটের HTTP API URL (Railway/Koyeb/লোকাল)
+DB_API_URL = os.environ.get("DB_API_URL", "http://localhost:8000")
+DB_API_TIMEOUT = 10.0
 
 # ==================== MULTI API KEY CONFIGURATION ====================
 API_KEY_01 = os.environ.get("API_KEY_01", "MURAD_18A5CEE19525C2BD4E971385")
@@ -30,136 +30,7 @@ BASE_URL_02 = os.environ.get("BASE_URL_02", "https://api.2oo9.cloud/MXS47FLFX0U/
 
 DEFAULT_API_KEY = "API_KEY_01"
 
-# ==================== COMMAND MENU SETUP ====================
-
-async def setup_commands(application):
-    """বটের কমান্ড মেনু সেটআপ করে (শুধু /start এবং /get1number)"""
-    try:
-        commands = [
-            BotCommand("start", "🚀 বট চালু করুন"),
-            BotCommand("get1number", "📞 একটি নম্বর নিন"),
-        ]
-        await application.bot.set_my_commands(commands)
-        print("✅ Command menu set successfully!")
-        return True
-    except Exception as e:
-        print(f"❌ Failed to set commands: {e}")
-        return False
-
-# ==================== DATABASE BOT API FUNCTIONS ====================
-
-async def db_api_request(method, file_name, data=None):
-    """Database Bot-এ API রিকোয়েস্ট পাঠায়"""
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            if method == "get":
-                url = f"https://api.telegram.org/bot{DB_BOT_TOKEN}/sendMessage"
-                payload = {
-                    "chat_id": DB_ADMIN_ID,
-                    "text": f"/get {file_name}"
-                }
-                response = await client.post(url, json=payload)
-                if response.status_code == 200:
-                    return await db_http_get(file_name)
-                return None
-            
-            elif method == "set":
-                url = f"https://api.telegram.org/bot{DB_BOT_TOKEN}/sendMessage"
-                json_data = json.dumps(data, ensure_ascii=False)
-                # ডেটা বড় হলে সীমিত করুন
-                if len(json_data) > 4000:
-                    json_data = json_data[:3500] + "..."
-                payload = {
-                    "chat_id": DB_ADMIN_ID,
-                    "text": f"/set {file_name} {json_data}"
-                }
-                response = await client.post(url, json=payload)
-                return response.status_code == 200
-    except Exception as e:
-        print(f"DB API Error: {e}")
-        return None
-
-async def db_http_get(file_name):
-    """HTTP এর মাধ্যমে Database Bot থেকে ডেটা নেয়"""
-    try:
-        file_path = os.path.join("storage_data", file_name)
-        if os.path.exists(file_path):
-            with open(file_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        return None
-    except Exception as e:
-        print(f"HTTP Get Error: {e}")
-        return None
-
-# ==================== ডেটা ফাংশন (Database Bot-এর সাথে সংযুক্ত) ====================
-
-data_cache = {}
-cache_timestamp = {}
-CACHE_TTL = 30  # 30 সেকেন্ড (বাড়ানো হয়েছে)
-
-def get_cached_data(file_key):
-    """ক্যাশ থেকে ডেটা নেয়"""
-    if file_key in data_cache and file_key in cache_timestamp:
-        if (datetime.now() - cache_timestamp[file_key]).seconds < CACHE_TTL:
-            return data_cache[file_key]
-    return None
-
-def set_cached_data(file_key, data):
-    """ক্যাশে ডেটা সেট করে"""
-    data_cache[file_key] = data
-    cache_timestamp[file_key] = datetime.now()
-
-async def load_data(file_name, default=None):
-    """Database Bot থেকে ডেটা লোড করে (ক্যাশ সহ)"""
-    cached = get_cached_data(file_name)
-    if cached is not None:
-        return cached
-    
-    try:
-        data = await db_api_request("get", file_name)
-        if data is not None:
-            set_cached_data(file_name, data)
-            return data
-    except Exception as e:
-        print(f"DB Bot get error for {file_name}: {e}")
-    
-    try:
-        file_path = os.path.join("storage_data", file_name)
-        if os.path.exists(file_path):
-            with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                set_cached_data(file_name, data)
-                return data
-    except:
-        pass
-    
-    if default is not None:
-        return default
-    return {} if file_name not in ["banned_users.json", "custom_services.json", "admins.json", "otp_groups.json"] else []
-
-async def save_data(file_name, data):
-    """Database Bot-এ ডেটা সেভ করে"""
-    try:
-        success = await db_api_request("set", file_name, data)
-        if success:
-            set_cached_data(file_name, data)
-            return True
-    except Exception as e:
-        print(f"DB Bot save error for {file_name}: {e}")
-    
-    try:
-        os.makedirs("storage_data", exist_ok=True)
-        file_path = os.path.join("storage_data", file_name)
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
-        set_cached_data(file_name, data)
-        return True
-    except Exception as e:
-        print(f"Local save error for {file_name}: {e}")
-        return False
-
-# ==================== কংক্রিট ডেটা ফাংশন ====================
-
+# ==================== DATA FILES ====================
 USER_DATA_FILE = "users.json"
 PAID_SMS_FILE = "paid_sms.json"
 STATS_FILE = "user_stats.json"
@@ -173,137 +44,176 @@ ADMINS_FILE = "admins.json"
 OTP_GROUPS_FILE = "otp_groups.json"
 USER_LAST_DATA_FILE = "user_last_data.json"
 
-async def load_users():
-    return await load_data(USER_DATA_FILE, {})
+# ==================== DATABASE API FUNCTIONS ====================
 
-async def save_users(data):
-    return await save_data(USER_DATA_FILE, data)
+async def db_api_get(file_name):
+    """Database Bot API থেকে ডেটা GET করে"""
+    try:
+        async with httpx.AsyncClient(timeout=DB_API_TIMEOUT) as client:
+            response = await client.get(f"{DB_API_URL}/data/{file_name}")
+            if response.status_code == 200:
+                return response.json().get("data")
+            print(f"⚠️ DB API GET error: {response.status_code}")
+            return None
+    except Exception as e:
+        print(f"❌ DB API GET exception: {e}")
+        return None
 
-async def load_paid_sms():
-    return await load_data(PAID_SMS_FILE, {})
+async def db_api_set(file_name, data):
+    """Database Bot API-তে ডেটা POST করে"""
+    try:
+        async with httpx.AsyncClient(timeout=DB_API_TIMEOUT) as client:
+            response = await client.post(
+                f"{DB_API_URL}/data/{file_name}",
+                json={"data": data}
+            )
+            if response.status_code == 200:
+                return True
+            print(f"⚠️ DB API SET error: {response.status_code}")
+            return False
+    except Exception as e:
+        print(f"❌ DB API SET exception: {e}")
+        return False
 
-async def save_paid_sms(data):
-    return await save_data(PAID_SMS_FILE, data)
+async def db_api_update(file_name, data):
+    """Database Bot API-তে ডেটা UPDATE (merge) করে"""
+    try:
+        async with httpx.AsyncClient(timeout=DB_API_TIMEOUT) as client:
+            response = await client.post(
+                f"{DB_API_URL}/data/{file_name}/update",
+                json={"data": data}
+            )
+            if response.status_code == 200:
+                return True
+            return False
+    except Exception as e:
+        print(f"❌ DB API UPDATE exception: {e}")
+        return False
 
-async def load_stats():
-    return await load_data(STATS_FILE, {})
+async def db_api_health():
+    """Database Bot API হেলথ চেক"""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{DB_API_URL}/health")
+            return response.status_code == 200
+    except:
+        return False
 
-async def save_stats(data):
-    return await save_data(STATS_FILE, data)
+# ==================== LOAD ALL DATA ON START ====================
 
-async def load_referral_data():
-    return await load_data(REFERRAL_DATA_FILE, {})
+async def load_all_data_from_db():
+    """বট স্টার্টে Database Bot থেকে সব ডেটা লোড করে"""
+    print("🔄 Connecting to Database Bot API...")
+    
+    is_healthy = await db_api_health()
+    if not is_healthy:
+        print("⚠️ Database Bot API is not reachable! Using local files.")
+        return False
+    
+    print("✅ Connected to Database Bot API")
+    
+    files_to_load = [
+        USER_DATA_FILE, PAID_SMS_FILE, STATS_FILE, REFERRAL_DATA_FILE,
+        BANNED_USERS_FILE, WITHDRAW_DATA_FILE, ACTIVITY_LOGS_FILE,
+        DATA_RANGE_FILE, CUSTOM_SERVICES_FILE, ADMINS_FILE, OTP_GROUPS_FILE,
+        USER_LAST_DATA_FILE
+    ]
+    
+    loaded_count = 0
+    for file_name in files_to_load:
+        try:
+            data = await db_api_get(file_name)
+            if data is not None and data != {} and data != []:
+                save_data_sync(file_name, data)
+                print(f"✅ Loaded: {file_name}")
+                loaded_count += 1
+            else:
+                print(f"📄 Empty or new: {file_name}")
+        except Exception as e:
+            print(f"❌ Failed to load {file_name}: {e}")
+    
+    print(f"✅ Loaded {loaded_count}/{len(files_to_load)} files from Database Bot")
+    return True
 
-async def save_referral_data(data):
-    return await save_data(REFERRAL_DATA_FILE, data)
+# ==================== COMMAND MENU SETUP ====================
 
-async def load_banned_users():
-    return await load_data(BANNED_USERS_FILE, [])
+async def setup_commands(application):
+    try:
+        commands = [
+            BotCommand("start", "🚀 বট চালু করুন"),
+            BotCommand("get1number", "📞 একটি নম্বর নিন"),
+        ]
+        await application.bot.set_my_commands(commands)
+        print("✅ Command menu set successfully!")
+        return True
+    except Exception as e:
+        print(f"❌ Failed to set commands: {e}")
+        return False
 
-async def save_banned_users(data):
-    return await save_data(BANNED_USERS_FILE, data)
-
-async def load_withdraw_requests():
-    return await load_data(WITHDRAW_DATA_FILE, {})
-
-async def save_withdraw_requests(data):
-    return await save_data(WITHDRAW_DATA_FILE, data)
-
-async def load_activity_logs():
-    return await load_data(ACTIVITY_LOGS_FILE, [])
-
-async def save_activity_logs(data):
-    return await save_data(ACTIVITY_LOGS_FILE, data)
-
-async def load_range_db():
-    return await load_data(DATA_RANGE_FILE, {})
-
-async def save_range_db(data):
-    return await save_data(DATA_RANGE_FILE, data)
-
-async def load_custom_services():
-    return await load_data(CUSTOM_SERVICES_FILE, [])
-
-async def save_custom_services(data):
-    return await save_data(CUSTOM_SERVICES_FILE, data)
-
-async def load_admins():
-    return await load_data(ADMINS_FILE, DEFAULT_ADMINS)
-
-async def save_admins(data):
-    return await save_data(ADMINS_FILE, data)
-
-async def load_otp_groups():
-    return await load_data(OTP_GROUPS_FILE, DEFAULT_OTP_GROUPS)
-
-async def save_otp_groups(data):
-    return await save_data(OTP_GROUPS_FILE, data)
-
-async def load_user_last_data():
-    return await load_data(USER_LAST_DATA_FILE, {})
-
-async def save_user_last_data(data):
-    return await save_data(USER_LAST_DATA_FILE, data)
-
-# ==================== SYNC WRAPPER FUNCTIONS ====================
+# ==================== DATA FUNCTIONS ====================
 
 DATA_DIR = "storage_data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
+data_cache = {}
+cache_timestamp = {}
+CACHE_TTL = 30
+
+def get_cached_data(file_key):
+    if file_key in data_cache and file_key in cache_timestamp:
+        if (datetime.now() - cache_timestamp[file_key]).seconds < CACHE_TTL:
+            return data_cache[file_key]
+    return None
+
+def set_cached_data(file_key, data):
+    data_cache[file_key] = data
+    cache_timestamp[file_key] = datetime.now()
+
 def load_data_sync(filename, default=None):
-    """সিঙ্ক্রোনাস ডেটা লোড (পুরানো কোডের জন্য)"""
+    """লোকাল ফাইল থেকে ডেটা লোড করে (ক্যাশ সহ)"""
+    cached = get_cached_data(filename)
+    if cached is not None:
+        return cached
+    
     file_path = os.path.join(DATA_DIR, filename)
     if not os.path.exists(file_path):
-        return default if default is not None else ({} if filename not in ["banned_users.json", "custom_services.json", "admins.json", "otp_groups.json"] else [])
+        # ডিফল্ট ডেটা তৈরি
+        if filename == "admins.json":
+            default_data = DEFAULT_ADMINS
+        elif filename == "otp_groups.json":
+            default_data = DEFAULT_OTP_GROUPS
+        elif filename in ["banned_users.json", "custom_services.json"]:
+            default_data = []
+        else:
+            default_data = {} if default is None else default
+        save_data_sync(filename, default_data)
+        return default_data
+    
     try:
         with open(file_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+            set_cached_data(filename, data)
+            return data
     except:
         return default if default is not None else {}
 
 def save_data_sync(filename, data):
-    """সিঙ্ক্রোনাস ডেটা সেভ (পুরানো কোডের জন্য)"""
+    """লোকাল ফাইলে ডেটা সেভ করে + Database Bot-এ সিঙ্ক করে"""
     os.makedirs(DATA_DIR, exist_ok=True)
     file_path = os.path.join(DATA_DIR, filename)
     try:
         with open(file_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
+        set_cached_data(filename, data)
+        
+        # ব্যাকগ্রাউন্ডে Database Bot-এ সিঙ্ক
+        asyncio.create_task(db_api_set(filename, data))
         return True
-    except:
+    except Exception as e:
+        print(f"❌ Save error {filename}: {e}")
         return False
 
-# ==================== DATABASE SYNC WORKER ====================
-
-async def db_sync_worker():
-    """ব্যাকগ্রাউন্ডে Database Bot-এ ডেটা সিঙ্ক করে"""
-    sync_count = 0
-    while True:
-        try:
-            sync_count += 1
-            # প্রতি ৫ মিনিটে সিঙ্ক (কমানো হয়েছে)
-            if sync_count % 5 == 0:
-                for file_name in [
-                    USER_DATA_FILE, PAID_SMS_FILE, STATS_FILE, REFERRAL_DATA_FILE,
-                    BANNED_USERS_FILE, WITHDRAW_DATA_FILE, ACTIVITY_LOGS_FILE,
-                    DATA_RANGE_FILE, CUSTOM_SERVICES_FILE, ADMINS_FILE, OTP_GROUPS_FILE,
-                    USER_LAST_DATA_FILE
-                ]:
-                    file_path = os.path.join(DATA_DIR, file_name)
-                    if os.path.exists(file_path):
-                        try:
-                            with open(file_path, "r", encoding="utf-8") as f:
-                                data = json.load(f)
-                            await db_api_request("set", file_name, data)
-                        except Exception as e:
-                            print(f"Sync error for {file_name}: {e}")
-                print(f"✅ DB Sync completed at {datetime.now()}")
-            
-            await asyncio.sleep(60)  # প্রতি ১ মিনিটে
-        except Exception as e:
-            print(f"DB Sync worker error: {e}")
-            await asyncio.sleep(60)
-
-# ==================== WELCOME MESSAGE CONFIGURATION ====================
+# ==================== WELCOME MESSAGE ====================
 WELCOME_MESSAGE = """⚡             𝗦𝗨𝗥𝗘 𝗕𝗢𝗧             ⚡ 
 ━━━━━━━━━━━━━━━━━━━━━━
 🟢 𝗣𝗿𝗲𝗺𝗶𝘂𝗺 & ⚡ 𝗙𝗮𝘀𝘁 𝗦𝗲𝗿𝘃𝗶𝗰𝗲 🟢
@@ -324,10 +234,66 @@ SUPPORT_LINK = "https://t.me/sure_otp_suppor"
 request_queue = asyncio.Queue()
 MAX_WORKERS = 500
 
-# ==================== USER LAST DATA STORAGE ====================
+# ==================== USER LAST DATA ====================
 user_last_data = {}
 
-# ==================== API KEY SELECTION FUNCTIONS ====================
+# ==================== ADMINS FUNCTIONS ====================
+
+DEFAULT_ADMINS = [2102179662]
+
+def load_admins():
+    return load_data_sync(ADMINS_FILE, DEFAULT_ADMINS)
+
+def save_admins(admins_list):
+    return save_data_sync(ADMINS_FILE, admins_list)
+
+def is_admin(user_id):
+    admins = load_admins()
+    return user_id in admins
+
+def add_admin(user_id):
+    admins = load_admins()
+    if user_id not in admins:
+        admins.append(user_id)
+        save_admins(admins)
+        return True
+    return False
+
+def remove_admin(user_id):
+    admins = load_admins()
+    if user_id in admins and user_id not in DEFAULT_ADMINS:
+        admins.remove(user_id)
+        save_admins(admins)
+        return True
+    return False
+
+# ==================== OTP GROUPS FUNCTIONS ====================
+
+DEFAULT_OTP_GROUPS = [-1004374381669]
+
+def load_otp_groups():
+    return load_data_sync(OTP_GROUPS_FILE, DEFAULT_OTP_GROUPS)
+
+def save_otp_groups(groups_list):
+    return save_data_sync(OTP_GROUPS_FILE, groups_list)
+
+def add_otp_group(group_id):
+    groups = load_otp_groups()
+    if group_id not in groups:
+        groups.append(group_id)
+        save_otp_groups(groups)
+        return True
+    return False
+
+def remove_otp_group(group_id):
+    groups = load_otp_groups()
+    if group_id in groups and group_id not in DEFAULT_OTP_GROUPS:
+        groups.remove(group_id)
+        save_otp_groups(groups)
+        return True
+    return False
+
+# ==================== API KEY FUNCTIONS ====================
 
 def get_api_key_for_range(range_text):
     custom_services = load_data_sync(CUSTOM_SERVICES_FILE, [])
@@ -354,7 +320,6 @@ def get_api_key_label(choice):
 # ==================== API RESPONSE PARSERS ====================
 
 def parse_number_response(data, api_choice):
-    """ভিন্ন API থেকে রেসপন্স পার্স করে"""
     try:
         if api_choice == "API_KEY_01":
             if data.get("meta", {}).get("status") == "ok":
@@ -389,7 +354,6 @@ def parse_number_response(data, api_choice):
         return None
 
 def parse_otp_response(data, api_choice):
-    """ভিন্ন API থেকে OTP রেসপন্স পার্স করে"""
     try:
         if api_choice == "API_KEY_01":
             if isinstance(data, dict):
@@ -425,7 +389,6 @@ def parse_otp_response(data, api_choice):
         return []
 
 def extract_otp_from_message(message):
-    """SMS মেসেজ থেকে OTP এক্সট্র্যাক্ট করে"""
     if not message:
         return None
     otp_match = re.search(r'\b\d{4,8}\b', str(message))
@@ -446,7 +409,7 @@ active_numbers = {}
 last_range = {}
 CHECK_INTERVAL = 0.2
 
-# ==================== HELPERS SECTION ====================
+# ==================== HELPERS ====================
 
 def get_bangladesh_time():
     return datetime.utcnow() + timedelta(hours=6)
@@ -537,7 +500,7 @@ def clean_country_display(val):
         return ""
     return re.sub(r'\s+', ' ', str(val)).strip().lower()
 
-# ==================== WITHDRAW DATA FUNCTIONS ====================
+# ==================== WITHDRAW FUNCTIONS ====================
 
 def load_withdraw_requests():
     return load_data_sync(WITHDRAW_DATA_FILE, {})
@@ -578,7 +541,7 @@ def unban_user(uid):
         return True
     return False
 
-# ==================== REFERRAL DATA FUNCTIONS ====================
+# ==================== REFERRAL FUNCTIONS ====================
 
 def load_referral_data():
     return load_data_sync(REFERRAL_DATA_FILE, {})
@@ -599,7 +562,7 @@ def get_referral_count(uid):
     uid_str = str(uid)
     return referral_data.get(uid_str, {}).get("referral_count", 0)
 
-# ==================== DATA RANGE FILE ====================
+# ==================== DATA RANGE FUNCTIONS ====================
 
 def load_range_db():
     return load_data_sync(DATA_RANGE_FILE, {})
@@ -618,7 +581,7 @@ def save_number_range_info(uid, number, range_text):
     }
     save_range_db(db)
 
-# ==================== CUSTOM SERVICE CONFIG ====================
+# ==================== CUSTOM SERVICE FUNCTIONS ====================
 
 def load_custom_services():
     return load_data_sync(CUSTOM_SERVICES_FILE, [])
@@ -626,63 +589,7 @@ def load_custom_services():
 def save_custom_services(data):
     return save_data_sync(CUSTOM_SERVICES_FILE, data)
 
-# ==================== ADMINS FUNCTIONS ====================
-
-DEFAULT_ADMINS = [2102179662]
-
-def load_admins():
-    return load_data_sync(ADMINS_FILE, DEFAULT_ADMINS)
-
-def save_admins(admins_list):
-    return save_data_sync(ADMINS_FILE, admins_list)
-
-def is_admin(user_id):
-    admins = load_admins()
-    return user_id in admins
-
-def add_admin(user_id):
-    admins = load_admins()
-    if user_id not in admins:
-        admins.append(user_id)
-        save_admins(admins)
-        return True
-    return False
-
-def remove_admin(user_id):
-    admins = load_admins()
-    if user_id in admins and user_id not in DEFAULT_ADMINS:
-        admins.remove(user_id)
-        save_admins(admins)
-        return True
-    return False
-
-# ==================== OTP GROUPS FUNCTIONS ====================
-
-DEFAULT_OTP_GROUPS = [-1004374381669]
-
-def load_otp_groups():
-    return load_data_sync(OTP_GROUPS_FILE, DEFAULT_OTP_GROUPS)
-
-def save_otp_groups(groups_list):
-    return save_data_sync(OTP_GROUPS_FILE, groups_list)
-
-def add_otp_group(group_id):
-    groups = load_otp_groups()
-    if group_id not in groups:
-        groups.append(group_id)
-        save_otp_groups(groups)
-        return True
-    return False
-
-def remove_otp_group(group_id):
-    groups = load_otp_groups()
-    if group_id in groups and group_id not in DEFAULT_OTP_GROUPS:
-        groups.remove(group_id)
-        save_otp_groups(groups)
-        return True
-    return False
-
-# ==================== COUNTRY MAPPING SECTION ====================
+# ==================== COUNTRY MAPPING ====================
 
 def get_country_info(number):
     number = str(number).strip()
@@ -753,7 +660,7 @@ def get_country_info(number):
             return country_map[prefix]
     return ("🌍", "Unknown")
 
-# ==================== SERVICE DETECTION SECTION ====================
+# ==================== SERVICE DETECTION ====================
 
 def detect_service(full_sms):
     if not full_sms:
@@ -776,7 +683,7 @@ def detect_service(full_sms):
             return service_name
     return "SMS SERVICE"
 
-# ==================== KEYBOARDS SECTION ====================
+# ==================== KEYBOARDS ====================
 
 def main_keyboard(user_id):
     keyboard = [
@@ -1002,7 +909,7 @@ def get_admin_panel_text():
     )
     return text
 
-# ==================== DATABASE FUNCTIONS SECTION ====================
+# ==================== DATABASE FUNCTIONS ====================
 
 def load_data_sync_old(filename=USER_DATA_FILE):
     return load_data_sync(filename, {})
@@ -1035,7 +942,7 @@ def user_exists(uid):
     data = load_data_sync_old(USER_DATA_FILE)
     return str(uid) in data
 
-# ==================== STATS FUNCTIONS SECTION ====================
+# ==================== STATS FUNCTIONS ====================
 
 def load_stats():
     return load_data_sync(STATS_FILE, {})
@@ -1146,7 +1053,7 @@ def get_global_system_stats():
                 continue
     return today_n, today_o, seven_n, seven_o, total_n, total_o
 
-# ==================== LEADERBOARD SECTION ====================
+# ==================== LEADERBOARD ====================
 
 async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -1203,7 +1110,7 @@ async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=main_keyboard(uid))
 
-# ==================== GET NUMBER — SERVICE SELECTION ====================
+# ==================== GET NUMBER SELECTION ====================
 
 def _build_services_keyboard(services):
     temp_btns = []
@@ -1256,12 +1163,11 @@ async def show_app_selection(update, context):
         reply_markup=keyboard
     )
 
-# ==================== AUTO OTP MONITOR SECTION ====================
+# ==================== OTP MONITOR ====================
 
 async def monitor_loop(app):
     while True:
         try:
-            # Check API 01
             api_key_01, base_url_01 = get_api_credentials_by_choice("API_KEY_01")
             headers_01 = {
                 "X-API-Key": api_key_01,
@@ -1278,7 +1184,6 @@ async def monitor_loop(app):
                 except:
                     pass
             
-            # Check API 02 (New 2oo9 API)
             api_key_02, base_url_02 = get_api_credentials_by_choice("API_KEY_02")
             headers_02 = {
                 "mauthapi": api_key_02,
@@ -1300,28 +1205,19 @@ async def monitor_loop(app):
         await asyncio.sleep(CHECK_INTERVAL)
 
 async def send_otp_to_groups(app, group_msg, group_buttons):
-    """সকল OTP গ্রুপে মেসেজ পাঠায়"""
     groups = load_otp_groups()
     success_count = 0
     fail_count = 0
-    
     for group_id in groups:
         try:
-            await app.bot.send_message(
-                group_id, 
-                group_msg, 
-                parse_mode="HTML", 
-                reply_markup=group_buttons
-            )
+            await app.bot.send_message(group_id, group_msg, parse_mode="HTML", reply_markup=group_buttons)
             success_count += 1
         except Exception as e:
             fail_count += 1
             print(f"❌ Group Send Fail ({group_id}): {e}")
-    
     return success_count, fail_count
 
 async def process_otps(otps, api_choice, app):
-    """OTP প্রসেস করে"""
     paid_data = load_data_sync(PAID_SMS_FILE, {})
     range_db = load_range_db()
     paid_keys_set = set(paid_data.keys())
@@ -1370,7 +1266,6 @@ async def process_otps(otps, api_choice, app):
             safe_full_sms = html.escape(str(full_sms))
             safe_otp_code = html.escape(str(otp_code))
             
-            # ইউজারের শেষ ডেটা সংরক্ষণ
             user_last_data[details["uid"]] = {
                 "last_range": num_range_info,
                 "last_service": service_name,
@@ -1378,7 +1273,6 @@ async def process_otps(otps, api_choice, app):
                 "last_number": matched_key
             }
             
-            # ============ UPDATED USER MESSAGE WITH BUTTONS ============
             user_msg = (
                 f"✅ <b>OTP RECEIVE SUCCESSFUL</b> ✅\n\n"
                 f"<blockquote>🌍 COUNTRY: <code>{country_flag} {country_name}</code></blockquote>\n"
@@ -1394,9 +1288,7 @@ async def process_otps(otps, api_choice, app):
                     InlineKeyboardButton("🔄 Change Number", callback_data=f"change_number_{details['uid']}"),
                     InlineKeyboardButton("🌏 Change Country", callback_data=f"change_country_{details['uid']}")
                 ],
-                [
-                    InlineKeyboardButton("📢 OTP GROUP", url="https://t.me/sure_otp_suppor")
-                ]
+                [InlineKeyboardButton("📢 OTP GROUP", url="https://t.me/sure_otp_suppor")]
             ])
             
             group_msg = (
@@ -1417,16 +1309,10 @@ async def process_otps(otps, api_choice, app):
             ])
             
             try:
-                await app.bot.send_message(
-                    details["uid"], 
-                    user_msg, 
-                    parse_mode="HTML",
-                    reply_markup=user_buttons
-                )
+                await app.bot.send_message(details["uid"], user_msg, parse_mode="HTML", reply_markup=user_buttons)
             except Exception as e:
                 print(f"❌ User Message Send Fail: {e}")
             
-            # ============ SEND TO ALL OTP GROUPS ============
             success, fail = await send_otp_to_groups(app, group_msg, group_buttons)
             print(f"📊 OTP Groups: Success={success}, Failed={fail}")
     
@@ -1438,7 +1324,7 @@ async def process_otps(otps, api_choice, app):
         elif (current_time - entry['timestamp']).total_seconds() > 3600:
             del active_numbers[num_key]
 
-# ==================== WORKER & API SECTION ====================
+# ==================== WORKER & API ====================
 
 async def fetch_number_async(range_str):
     try:
@@ -1540,7 +1426,6 @@ async def fast_allocate_number_multi(query, context, ranges_list, sid):
     save_number_range_info(uid, clean_num, successful_range)
     country_flag, country_name = get_country_info(clean_num)
     
-    # ইউজারের শেষ ডেটা সংরক্ষণ
     user_last_data[uid] = {
         "last_range": successful_range,
         "last_service": sid,
@@ -1580,7 +1465,7 @@ async def worker():
         finally:
             request_queue.task_done()
 
-# ==================== AUTO NUMBER FROM LINK / DEEP LINK ====================
+# ==================== AUTO NUMBER ====================
 
 async def process_auto_number(update, context, range_text):
     uid = update.effective_user.id
@@ -1623,7 +1508,7 @@ async def process_auto_number(update, context, range_text):
         print(f"Auto Number Error: {e}")
         await status_msg.edit_text(f"❌ Error: {str(e)}")
 
-# ==================== USER PANEL — PROCESS NUMBERS ====================
+# ==================== USER PANEL PROCESS NUMBERS ====================
 
 async def process_numbers(update_or_query, context, range_text, count):
     if isinstance(update_or_query, Update) and update_or_query.callback_query:
@@ -1699,7 +1584,7 @@ async def process_numbers(update_or_query, context, range_text, count):
         print(f"Process Number Error: {e}")
         await status_msg.edit_text(f"❌ System Error: {str(e)}")
 
-# ==================== REFER AND EARN SECTION ====================
+# ==================== REFER AND EARN ====================
 
 async def refer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -1869,7 +1754,7 @@ async def process_withdraw_cancel(update: Update, context: ContextTypes.DEFAULT_
     await query.message.edit_text("❌ WITHDRAW CANCELLED")
     await context.bot.send_message(uid, "🔹 PLEASE USE THE BUTTONS BELOW:", reply_markup=main_keyboard(uid))
 
-# ==================== ADMIN PANEL - WITHDRAW APPROVAL ====================
+# ==================== ADMIN PANEL WITHDRAW APPROVAL ====================
 
 async def admin_approve_withdraw(update, context, payment_id):
     query = update.callback_query
@@ -1916,7 +1801,7 @@ async def admin_reject_withdraw(update, context, payment_id):
         pass
     await query.message.edit_text(f"❌ REJECTED | User: {uid} | Amount: {format_balance(amount)} BDT")
 
-# ==================== ADMIN PANEL - BAN/UNBAN & BALANCE ====================
+# ==================== ADMIN PANEL BAN/UNBAN & BALANCE ====================
 
 async def process_add_balance_user(update, context):
     uid_to_add = update.message.text.strip()
@@ -2045,7 +1930,7 @@ async def process_unban_user(update, context):
     await update.message.reply_text(f"✅ USER `{uid_to_unban}` UNBANNED!", parse_mode="Markdown")
     context.user_data["admin_unban_mode"] = False
 
-# ==================== MESSAGE HANDLER SECTION ====================
+# ==================== MESSAGE HANDLER ====================
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
@@ -2517,7 +2402,7 @@ def is_state_cancelling_input(text_input):
     ]
     return clean_text in cancelling_keywords
 
-# ==================== COMMAND HANDLERS SECTION ====================
+# ==================== COMMAND HANDLERS ====================
 
 async def get1number_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -2571,7 +2456,7 @@ async def leaderboard_command_slash(update: Update, context: ContextTypes.DEFAUL
         return
     await leaderboard_command(update, context)
 
-# ==================== START & CALLBACK SECTION ====================
+# ==================== START ====================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -2609,6 +2494,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(WELCOME_MESSAGE, parse_mode="Markdown")
     await update.message.reply_text("🔹 PLEASE USE THE BUTTONS BELOW:", reply_markup=main_keyboard(uid))
 
+# ==================== CALLBACK ====================
+
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     uid = query.from_user.id
@@ -2628,7 +2515,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["broadcast_mode"] = False
     context.user_data["mode"] = None
 
-    # ============ CHANGE NUMBER BUTTON ============
+    # CHANGE NUMBER
     if data.startswith("change_number_"):
         user_id = int(data.replace("change_number_", ""))
         
@@ -2714,7 +2601,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ============ CHANGE COUNTRY BUTTON ============
+    # CHANGE COUNTRY
     if data.startswith("change_country_"):
         user_id = int(data.replace("change_country_", ""))
         
@@ -2819,7 +2706,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ============ NEW: OTP Group Management ============
+    # OTP GROUP MANAGEMENT
     if data == "admin_otp_group_menu":
         groups = load_otp_groups()
         text = f"📢 <b>OTP GROUP MANAGEMENT</b>\n───────────────────\n📊 Total Groups: <code>{len(groups)}</code>\n\n"
@@ -2881,7 +2768,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.answer("❌ Cannot remove default group!", show_alert=True)
         return
 
-    # ============ NEW: Admin Management ============
+    # ADMIN MANAGEMENT
     if data == "admin_admin_management":
         admins = load_admins()
         text = f"👑 <b>ADMIN MANAGEMENT</b>\n───────────────────\n👑 Total Admins: <code>{len(admins)}</code>\n\n"
@@ -2943,7 +2830,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.answer("❌ Cannot remove default admin!", show_alert=True)
         return
 
-    # ============ USER MANAGEMENT ============
+    # USER MANAGEMENT
     if data == "adm_usermgnt_broadcast":
         context.user_data["broadcast_mode"] = True
         await query.message.edit_text(
@@ -2976,7 +2863,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("No data.")
         return
 
-    # ============ SYSTEM CONFIG ============
+    # SYSTEM CONFIG
     if data == "adm_sys_stats":
         t_n, t_o, s_n, s_o, tot_n, tot_o = get_global_system_stats()
         msg = (
@@ -3045,7 +2932,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ============ MANAGE SERVICES ============
+    # MANAGE SERVICES
     if data == "manage_svc_back_to_list":
         kb = build_manage_services_inline_keyboard()
         await query.message.edit_text(
@@ -3308,7 +3195,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ============ USER BOT CALLBACKS ============
+    # USER BOT CALLBACKS
     if data.startswith("svc_"):
         idx = int(data.replace("svc_", ""))
         services = context.user_data.get("la_services", [])
@@ -3473,39 +3360,34 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-# ==================== MAIN & POST INIT SECTION ====================
+# ==================== MAIN ====================
 
 async def post_init(application):
-    # কমান্ড মেনু সেটআপ করুন
+    # 1. Database Bot থেকে সব ডেটা লোড করুন (সবার আগে)
+    await load_all_data_from_db()
+    
+    # 2. কমান্ড মেনু সেটআপ
     await setup_commands(application)
     
-    # ওয়ার্কার শুরু করুন
+    # 3. ওয়ার্কার শুরু
     for _ in range(20):
         asyncio.create_task(worker())
     
-    # OTP মনিটর শুরু করুন
+    # 4. OTP মনিটর শুরু
     asyncio.create_task(monitor_loop(application))
     
-    # Database Bot-এ ডেটা সিঙ্ক শুরু করুন
-    asyncio.create_task(db_sync_worker())
-    
-    print("✅ Bot initialized successfully!")
+    print("✅ Bot initialized successfully with data from Database Bot!")
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).concurrent_updates(True).post_init(post_init).build()
     
-    # Command Handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("get1number", get1number_command))
     app.add_handler(CommandHandler("balance", balance_command))
     app.add_handler(CommandHandler("profile", profile_command))
     app.add_handler(CommandHandler("refer", refer_command_slash))
     app.add_handler(CommandHandler("leaderboard", leaderboard_command_slash))
-    
-    # Callback Handler
     app.add_handler(CallbackQueryHandler(button_callback))
-    
-    # Message Handler
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     
     print("🚀 BOT RUNNING...")
