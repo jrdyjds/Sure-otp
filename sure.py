@@ -1246,11 +1246,11 @@ async def process_otps(otps, api_choice, app):
                 f"<b>💵 ADD BALANCE FOR {OTP_RATE:.2f} BDT</b>"
             )
             
-            # ============ NEW INLINE BUTTONS ============
+            # ============ UPDATED INLINE BUTTONS (ছোট হাতের অক্ষরে) ============
             user_buttons = InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("🔄 CHANGE NUMBER", callback_data=f"change_number_{details['uid']}"),
-                    InlineKeyboardButton("🌏 CHANGE COUNTRY", callback_data=f"change_country_{details['uid']}")
+                    InlineKeyboardButton("🔄 Change Number", callback_data=f"change_number_{details['uid']}"),
+                    InlineKeyboardButton("🌏 Change Country", callback_data=f"change_country_{details['uid']}")
                 ],
                 [
                     InlineKeyboardButton("📢 OTP GROUP", url="https://t.me/sure_otp_suppor")
@@ -1417,8 +1417,8 @@ async def fast_allocate_number_multi(query, context, ranges_list, sid):
     )
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🔄 CHANGE NUMBER", callback_data=f"change_number_{uid}"),
-            InlineKeyboardButton("🌏 CHANGE COUNTRY", callback_data=f"change_country_{uid}")
+            InlineKeyboardButton("🔄 Change Number", callback_data=f"change_number_{uid}"),
+            InlineKeyboardButton("🌏 Change Country", callback_data=f"change_country_{uid}")
         ],
         [InlineKeyboardButton("📢 OTP GROUP", url="https://t.me/SURE_OTP_GROUP")]
     ])
@@ -1473,8 +1473,8 @@ async def process_auto_number(update, context, range_text):
         )
         keyboard = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("🔄 CHANGE NUMBER", callback_data=f"change_number_{uid}"),
-                InlineKeyboardButton("🌏 CHANGE COUNTRY", callback_data=f"change_country_{uid}")
+                InlineKeyboardButton("🔄 Change Number", callback_data=f"change_number_{uid}"),
+                InlineKeyboardButton("🌏 Change Country", callback_data=f"change_country_{uid}")
             ],
             [InlineKeyboardButton("📢 OTP GROUP", url="https://t.me/panelx_sk_otp")]
         ])
@@ -1547,8 +1547,8 @@ async def process_numbers(update_or_query, context, range_text, count):
 
         keyboard = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("🔄 CHANGE NUMBER", callback_data=f"change_number_{uid}"),
-                InlineKeyboardButton("🌏 CHANGE COUNTRY", callback_data=f"change_country_{uid}")
+                InlineKeyboardButton("🔄 Change Number", callback_data=f"change_number_{uid}"),
+                InlineKeyboardButton("🌏 Change Country", callback_data=f"change_country_{uid}")
             ],
             [InlineKeyboardButton("📢 OTP GROUP", url="https://t.me/panelx_sk_otp")]
         ])
@@ -2490,22 +2490,32 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["broadcast_mode"] = False
     context.user_data["mode"] = None
 
-    # ============ CHANGE NUMBER BUTTON ============
+    # ============ CHANGE NUMBER BUTTON (FIXED) ============
     if data.startswith("change_number_"):
         user_id = int(data.replace("change_number_", ""))
         
-        if uid not in user_last_data:
-            await query.message.reply_text(
-                "❌ আপনার আগের ডেটা পাওয়া যায়নি। দয়া করে নতুন করে GET NUMBER করুন।",
-                reply_markup=main_keyboard(uid)
-            )
-            return
+        # ============ প্রথমে last_range ডিকশনারি চেক করুন ============
+        if uid not in last_range:
+            # যদি last_range-এ না থাকে, তাহলে user_last_data চেক করুন
+            if uid not in user_last_data:
+                await query.message.reply_text(
+                    "❌ আপনার আগের ডেটা পাওয়া যায়নি। দয়া করে নতুন করে GET NUMBER করুন।",
+                    reply_markup=main_keyboard(uid)
+                )
+                return
+            
+            last_data = user_last_data[uid]
+            last_range_text = last_data.get("last_range", "")
+            last_service = last_data.get("last_service", "")
+        else:
+            # last_range থেকে ডেটা নিন
+            last_range_text = last_range[uid]
+            # service নাম বের করার চেষ্টা করুন
+            last_service = "Unknown"
+            if uid in user_last_data:
+                last_service = user_last_data[uid].get("last_service", "Unknown")
         
-        last_data = user_last_data[uid]
-        last_range = last_data.get("last_range", "")
-        last_service = last_data.get("last_service", "")
-        
-        if not last_range:
+        if not last_range_text:
             await query.message.reply_text(
                 "❌ রেঞ্জ তথ্য পাওয়া যায়নি। দয়া করে নতুন করে GET NUMBER করুন।",
                 reply_markup=main_keyboard(uid)
@@ -2515,32 +2525,40 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.edit_text(
             f"🔄 <b>FETCHING NEW NUMBER</b>\n\n"
             f"<blockquote>📱 SERVICE: <code>{last_service}</code></blockquote>\n"
-            f"<blockquote>📶 RANGE: <code>{last_range}</code></blockquote>\n\n"
+            f"<blockquote>📶 RANGE: <code>{last_range_text}</code></blockquote>\n\n"
             f"<i>⏳ Searching for new number...</i>",
             parse_mode="HTML"
         )
         
-        res = await fetch_number_async(last_range)
+        res = await fetch_number_async(last_range_text)
         
         if not res or not res.get("number"):
             await query.message.edit_text(
                 f"❌ <b>No number available</b>\n\n"
-                f"<blockquote>📶 RANGE: <code>{last_range}</code></blockquote>\n"
+                f"<blockquote>📶 RANGE: <code>{last_range_text}</code></blockquote>\n"
                 f"⚠️ এই রেঞ্জে এখন নম্বর নেই। অন্য রেঞ্জ চেষ্টা করুন।",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🌏 CHANGE COUNTRY", callback_data=f"change_country_{uid}")
+                    InlineKeyboardButton("🌏 Change Country", callback_data=f"change_country_{uid}")
                 ]])
             )
             return
         
         clean_num = normalize_number(res["number"])
         add_number_taken(uid, 1)
-        last_range[uid] = last_range
-        active_numbers[clean_num] = {"uid": uid, "range": last_range, "timestamp": datetime.now()}
-        save_number_range_info(uid, clean_num, last_range)
+        last_range[uid] = last_range_text
+        active_numbers[clean_num] = {"uid": uid, "range": last_range_text, "timestamp": datetime.now()}
+        save_number_range_info(uid, clean_num, last_range_text)
         
         country_flag, country_name = get_country_info(clean_num)
+        
+        # user_last_data আপডেট করুন
+        if uid not in user_last_data:
+            user_last_data[uid] = {}
+        user_last_data[uid]["last_range"] = last_range_text
+        user_last_data[uid]["last_service"] = last_service
+        user_last_data[uid]["last_country"] = f"{country_flag} {country_name}"
+        user_last_data[uid]["last_number"] = clean_num
         
         new_number_msg = (
             f"✅ <b>NEW NUMBER ALLOCATED</b> ✅\n\n"
@@ -2552,8 +2570,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         new_buttons = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("🔄 CHANGE NUMBER", callback_data=f"change_number_{uid}"),
-                InlineKeyboardButton("🌏 CHANGE COUNTRY", callback_data=f"change_country_{uid}")
+                InlineKeyboardButton("🔄 Change Number", callback_data=f"change_number_{uid}"),
+                InlineKeyboardButton("🌏 Change Country", callback_data=f"change_country_{uid}")
             ],
             [InlineKeyboardButton("📢 OTP GROUP", url="https://t.me/sure_otp_suppor")]
         ])
