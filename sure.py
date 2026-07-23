@@ -16,11 +16,6 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Con
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8931522547:AAHtwfo1JmFS8G5V6qiSYLpef63jrJ4ME6o")
 
-# ==================== DATABASE API CONFIG ====================
-# ডেটাবেজ বটের HTTP API URL (Railway/Koyeb/লোকাল)
-DB_API_URL = os.environ.get("DB_API_URL", "http://localhost:8000")
-DB_API_TIMEOUT = 10.0
-
 # ==================== MULTI API KEY CONFIGURATION ====================
 API_KEY_01 = os.environ.get("API_KEY_01", "MURAD_18A5CEE19525C2BD4E971385")
 BASE_URL_01 = os.environ.get("BASE_URL_01", "https://2eee7.com/@Access/@Bot/2eee7/@public")
@@ -43,97 +38,6 @@ CUSTOM_SERVICES_FILE = "custom_services.json"
 ADMINS_FILE = "admins.json"
 OTP_GROUPS_FILE = "otp_groups.json"
 USER_LAST_DATA_FILE = "user_last_data.json"
-
-# ==================== DATABASE API FUNCTIONS ====================
-
-async def db_api_get(file_name):
-    """Database Bot API থেকে ডেটা GET করে"""
-    try:
-        async with httpx.AsyncClient(timeout=DB_API_TIMEOUT) as client:
-            response = await client.get(f"{DB_API_URL}/data/{file_name}")
-            if response.status_code == 200:
-                return response.json().get("data")
-            print(f"⚠️ DB API GET error: {response.status_code}")
-            return None
-    except Exception as e:
-        print(f"❌ DB API GET exception: {e}")
-        return None
-
-async def db_api_set(file_name, data):
-    """Database Bot API-তে ডেটা POST করে"""
-    try:
-        async with httpx.AsyncClient(timeout=DB_API_TIMEOUT) as client:
-            response = await client.post(
-                f"{DB_API_URL}/data/{file_name}",
-                json={"data": data}
-            )
-            if response.status_code == 200:
-                return True
-            print(f"⚠️ DB API SET error: {response.status_code}")
-            return False
-    except Exception as e:
-        print(f"❌ DB API SET exception: {e}")
-        return False
-
-async def db_api_update(file_name, data):
-    """Database Bot API-তে ডেটা UPDATE (merge) করে"""
-    try:
-        async with httpx.AsyncClient(timeout=DB_API_TIMEOUT) as client:
-            response = await client.post(
-                f"{DB_API_URL}/data/{file_name}/update",
-                json={"data": data}
-            )
-            if response.status_code == 200:
-                return True
-            return False
-    except Exception as e:
-        print(f"❌ DB API UPDATE exception: {e}")
-        return False
-
-async def db_api_health():
-    """Database Bot API হেলথ চেক"""
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(f"{DB_API_URL}/health")
-            return response.status_code == 200
-    except:
-        return False
-
-# ==================== LOAD ALL DATA ON START ====================
-
-async def load_all_data_from_db():
-    """বট স্টার্টে Database Bot থেকে সব ডেটা লোড করে"""
-    print("🔄 Connecting to Database Bot API...")
-    
-    is_healthy = await db_api_health()
-    if not is_healthy:
-        print("⚠️ Database Bot API is not reachable! Using local files.")
-        return False
-    
-    print("✅ Connected to Database Bot API")
-    
-    files_to_load = [
-        USER_DATA_FILE, PAID_SMS_FILE, STATS_FILE, REFERRAL_DATA_FILE,
-        BANNED_USERS_FILE, WITHDRAW_DATA_FILE, ACTIVITY_LOGS_FILE,
-        DATA_RANGE_FILE, CUSTOM_SERVICES_FILE, ADMINS_FILE, OTP_GROUPS_FILE,
-        USER_LAST_DATA_FILE
-    ]
-    
-    loaded_count = 0
-    for file_name in files_to_load:
-        try:
-            data = await db_api_get(file_name)
-            if data is not None and data != {} and data != []:
-                save_data_sync(file_name, data)
-                print(f"✅ Loaded: {file_name}")
-                loaded_count += 1
-            else:
-                print(f"📄 Empty or new: {file_name}")
-        except Exception as e:
-            print(f"❌ Failed to load {file_name}: {e}")
-    
-    print(f"✅ Loaded {loaded_count}/{len(files_to_load)} files from Database Bot")
-    return True
 
 # ==================== COMMAND MENU SETUP ====================
 
@@ -198,16 +102,13 @@ def load_data_sync(filename, default=None):
         return default if default is not None else {}
 
 def save_data_sync(filename, data):
-    """লোকাল ফাইলে ডেটা সেভ করে + Database Bot-এ সিঙ্ক করে"""
+    """লোকাল ফাইলে ডেটা সেভ করে (দ্রুত)"""
     os.makedirs(DATA_DIR, exist_ok=True)
     file_path = os.path.join(DATA_DIR, filename)
     try:
         with open(file_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
         set_cached_data(filename, data)
-        
-        # ব্যাকগ্রাউন্ডে Database Bot-এ সিঙ্ক
-        asyncio.create_task(db_api_set(filename, data))
         return True
     except Exception as e:
         print(f"❌ Save error {filename}: {e}")
@@ -3363,20 +3264,17 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==================== MAIN ====================
 
 async def post_init(application):
-    # 1. Database Bot থেকে সব ডেটা লোড করুন (সবার আগে)
-    await load_all_data_from_db()
-    
-    # 2. কমান্ড মেনু সেটআপ
+    # কমান্ড মেনু সেটআপ
     await setup_commands(application)
     
-    # 3. ওয়ার্কার শুরু
+    # ওয়ার্কার শুরু
     for _ in range(20):
         asyncio.create_task(worker())
     
-    # 4. OTP মনিটর শুরু
+    # OTP মনিটর শুরু
     asyncio.create_task(monitor_loop(application))
     
-    print("✅ Bot initialized successfully with data from Database Bot!")
+    print("✅ Bot initialized successfully!")
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).concurrent_updates(True).post_init(post_init).build()
